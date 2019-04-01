@@ -1,4 +1,3 @@
-# Imports
 import socket, serial, time, datetime, threading, os
 from digi.xbee.devices import XBeeDevice
 
@@ -7,24 +6,16 @@ from digi.xbee.devices import XBeeDevice
 KiB = 1024
 BUFFER_LIMIT = 4095
 
-
 # Localhost IP and arbirtarily defined based port
 UDP_PORT = 14555
 UDP_IP = '127.0.0.1'
-KNOWN_64BIT_ADDRS = {
-    0x0013A20040D68C2E: ('GCS', None),
-    0x0013A20041520335: ('Relay', 14555),
-    0x0013A20040D68C32: ('Worker #1', 14556),
-}
 SCRIPT_START = time.time()
-
 
 # MAVLink constants
 HEADER_LEN = 6
 LEN_BYTE = 1
 CRC_LEN = 2
 START_BYTE = 0xfe
-
 
 # Fucntions and Classes
 class XBeeToUDP(XBeeDevice):
@@ -62,9 +53,6 @@ class XBeeToUDP(XBeeDevice):
         print("Finished: {}\n".format(mesh.get_devices()))
 
         while True:
-            # Search for new devices in the network - 0.05 Hz
-            # if not loops % 20000
-
             # Check for new packets from each remote XBee
             for device in mesh.get_devices():
                 message =  self.read_data_from(device)
@@ -85,7 +73,7 @@ class XBeeToUDP(XBeeDevice):
                     self.udp_connections[key]['IN'] = queued_data[sent:]
 
 
-            # Check general broadcasts
+            # TODO Check general broadcasts
 
             # Check for new items in the outgoing queue
             for device in mesh.get_devices():
@@ -166,6 +154,7 @@ class XBeeToUDP(XBeeDevice):
 
 
 if __name__ == '__main__':
+    # TODO: Add command line argument passing 
     xb = XBeeToUDP('/dev/ttyUSB0', 230400)
     xb.start()
 
