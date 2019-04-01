@@ -41,10 +41,8 @@ class XBeeToUDP(XBeeDevice):
 
 
     def primary_loop(self):
+        # Discover devices on the mesh network
         mesh = self.get_network()
-        # mesh.set_discovery_timeout(5)
-        loops = 0
-
         mesh.start_discovery_process()
 
         print("Discovering Devices...")
@@ -92,7 +90,6 @@ class XBeeToUDP(XBeeDevice):
                         outdata = outdata[255:]
 
             # End of while loop
-            loops += 1
             time.sleep(0.001)
 
 
@@ -154,7 +151,7 @@ class XBeeToUDP(XBeeDevice):
 
 
 if __name__ == '__main__':
-    # TODO: Add command line argument passing 
+    # TODO: Add command line argument passing
     xb = XBeeToUDP('/dev/ttyUSB0', 230400)
     xb.start()
 
