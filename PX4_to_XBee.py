@@ -2,25 +2,26 @@ from digi.xbee.devices import XBeeDevice
 import serial, time
 
 def main():
+	# TODO: Add command line argument passing 
 	px4 = serial.Serial('/dev/ttyACM0', 115200)
 	xb = XBeeDevice('/dev/ttyUSB0', 230400)
 	xb.open()
-	
+
 	network = xb.get_network()
 	network.start_discovery_process()
-	
+
 	while network.is_discovery_running():
 		time.sleep(0.1)
-	
+
 	GCS = None
-	
+
 	for device in network.get_devices():
 		if device.get_node_id() == 'GCS':
 			GCS = device
-			
+
 	if GCS is None:
 		raise Exception('Ground Control Station not discovered.')
-	
+
 	while True:
 		# Read PX4, Write to XBee
 		if 100 <= px4.in_waiting < 4095:
@@ -40,9 +41,8 @@ def main():
 			data = bytes(message.data)
 			print('[XBee -> PX4] {}'.format(data))
 			px4.write(data)
-		
+
 		time.sleep(0.001)
 
 if __name__ == '__main__':
 	main()
-
