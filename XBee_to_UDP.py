@@ -1,13 +1,14 @@
-import socket, serial, time, datetime, threading, os
+import socket
+import time
+import threading
 from digi.xbee.devices import XBeeDevice
-from digi.xbee.exception import TimeoutException
+from commonlib import print_msg
 
 
 # Localhost IP and arbirtarily defined based port
 LOCALHOST = '127.0.0.1'
 UDP_PORT = 14555
 UDP_IP = LOCALHOST
-SCRIPT_START = time.time()
 
 # MAVLink constants
 HEADER_LEN = 6
@@ -23,35 +24,53 @@ KiB = 1024
 SER_BUF_LIMIT = 0xFFF
 
 
-# Fucntions and Classes
+# Functions and Classes
 class XBeeToUDP(XBeeDevice):
-    def __init__(self, serialport='/dev/ttyUSB0', baud_rate=XBEE_MAX_BAUD,
+    def __init__(self, serial_port='/dev/ttyUSB0', baud_rate=XBEE_MAX_BAUD,
             udp=(UDP_IP, UDP_PORT), **kwargs):
+        """
+
+        :param serial_port:
+        :param baud_rate:
+        :param udp:
+        :param kwargs:
+        """
 
         # Initialize XBee device connection
-        super().__init__(port=serialport, baud_rate=baud_rate, **kwargs)
+        super().__init__(port=serial_port, baud_rate=baud_rate, **kwargs)
 
         # UDP variables
         self.udp_ip, self.udp_port = udp
         self.udp_connections = {}  # Port: (b'\xfe\x42... queue_in, queue_out)
         self.sockets = {}
         self.running = True
-
+        self.starttime = time.time()
 
     def start(self):
+        """
+
+        :return:
+        """
         self.open()
         time.sleep(0.1)
         # Primary loop - deals with incoming and outgoing XBee data
         serial_thread = threading.Thread(target=self.primary_loop,
-                                        daemon=True)
+                                         daemon=True)
         serial_thread.start()
 
     def close(self):
-        super().close()
+        """
+
+        :return:
+        """
+        # Set while loop conditions to False for all threads finish executing
         self.running = False
 
-
     def primary_loop(self):
+        """
+
+        :return:
+        """
         # Discover devices on the mesh network
         mesh = self.get_network()
         mesh.start_discovery_process()
@@ -64,64 +83,68 @@ class XBeeToUDP(XBeeDevice):
         bytes_recv = 0
         bytes_sent = 0
         recv_start = time.time()
-        try:
-            while self.running:
-                # Check for new packets from each remote XBee
-                for device in mesh.get_devices():
-                    message =  self.read_data_from(device)
-                    if message is not None:
-                        indata = bytes(message.data)
-                        bytes_recv += len(indata)
-                        key = device.get_64bit_addr().address.hex()
 
-                        if key not in self.udp_connections:
-                            # Add new queue and spawn new UDP thread
-                            self.spawn_udp_thread(key)
-                            time.sleep(0.001)
-
-                        queued_data = self.udp_connections[key]['IN'] + indata
-                        # TODO: Semaphore/Mutex begin
-                        sent = self.sockets[key].send(queued_data)
-                        # TODO: Semaphore/Mutex end
-                        self.print_msg(key, incoming=queued_data[:sent])
-                        self.udp_connections[key]['IN'] = queued_data[sent:]
-
-                        time_elapsed = time.time() - recv_start
-                        in_rate = 8 * bytes_recv / time_elapsed / 1000
-                        print('Recv: {0:.2f}kbps'.format(in_rate))
-
-
-                # TODO Check general broadcasts
-
-                # Check for new items in the outgoing queue
-                for device in mesh.get_devices():
+        while self.running:
+            # Check for new packets from each remote XBee
+            for device in mesh.get_devices():
+                message = self.read_data_from(device)
+                if message is not None:
+                    indata = bytes(message.data)
+                    bytes_recv += len(indata)
                     key = device.get_64bit_addr().address.hex()
 
                     if key not in self.udp_connections:
+                        # Add new queue and spawn new UDP thread
                         self.spawn_udp_thread(key)
+                        time.sleep(0.001)
 
-                    # TODO: Semaphore/mutex?
-                    outdata = self.udp_connections[key]['OUT']
-                    if outdata:
-                        self.udp_connections[key]['OUT'] = self.udp_connections[key]['OUT'][len(outdata):]
-                        while outdata:
-                            pkt_sent = self.send_data(device, outdata[:XBEE_PKT_MAX])
-                            bytes_sent += len(outdata[:XBEE_PKT_MAX])
-                            self.print_msg(key, outgoing=outdata[:XBEE_PKT_MAX])
-                            outdata = outdata[XBEE_PKT_MAX:]
+                    queued_data = self.udp_connections[key]['IN'] + indata
+                    sent = self.sockets[key].send(queued_data)
+                    print_msg(key, self.starttime, incoming=queued_data[:sent])
+                    self.udp_connections[key]['IN'] = queued_data[sent:]
 
-                        time_elapsed = time.time() - recv_start
-                        out_rate = 8 * bytes_sent / time_elapsed / 1000
-                        print('Sent: {0:.2f}kbps'.format(out_rate))
+                    time_elapsed = time.time() - recv_start
+                    in_rate = 8 * bytes_recv / time_elapsed / 1000
+                    print('Recv: {0:.2f}kbps'.format(in_rate))
 
-                # End of while loop
-                time.sleep(0.001)
+            # TODO Check general broadcasts
 
-        except TimeoutException:
-                print('Exiting main loop')
+            # Check for new items in the outgoing queue
+            for device in mesh.get_devices():
+                key = device.get_64bit_addr().address.hex()
 
+                if key not in self.udp_connections:
+                    self.spawn_udp_thread(key)
+
+                outdata = self.udp_connections[key]['OUT']
+                if outdata:
+                    self.udp_connections[key]['OUT'] = self.udp_connections[key]['OUT'][len(outdata):]
+                    while outdata:
+                        pkt_sent = self.send_data(device, outdata[:XBEE_PKT_MAX])
+                        bytes_sent += len(outdata[:XBEE_PKT_MAX])
+                        print_msg(key, self.starttime, outgoing=outdata[:XBEE_PKT_MAX])
+                        outdata = outdata[XBEE_PKT_MAX:]
+
+                    time_elapsed = time.time() - recv_start
+                    out_rate = 8 * bytes_sent / time_elapsed / 1000
+                    print('Sent: {0:.2f}kbps'.format(out_rate))
+
+            # End of while loop
+            time.sleep(0.001)
+
+        # Close XBee and all UDP Sockets
+        super().close()
+        time.sleep(1)
+        for key in self.udp_connections:
+            self.udp_connections[key].close()
+            print('Exiting thread for {}'.format(key))
 
     def udp_thread(self, key):
+        """
+
+        :param key:
+        :return:
+        """
         # Create socket and update port value for future new UDP connections
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.connect((self.udp_ip, self.udp_port))
@@ -137,44 +160,16 @@ class XBeeToUDP(XBeeDevice):
             self.udp_connections[key]['OUT'] += outdata
             time.sleep(0.05)
 
-        sock.close()
-        print('Exiting thread for {}'.format(key))
-
     def spawn_udp_thread(self, key):
+        """
+
+        :param key:
+        :return:
+        """
         print(key)
         self.udp_connections[key] = dict(IN=b'', OUT=b'', PORT=self.udp_port)
         _thread = threading.Thread(target=self.udp_thread, args=(key,), daemon=True)
         _thread.start()
-
-    @staticmethod
-    def print_msg(key, incoming=b'', outgoing=b''):
-        # Formats incoming and outgoing messages to fit the terminal window
-        cols, rows = os.get_terminal_size()
-        elapsed = time.time()-SCRIPT_START
-        lhs = 6  # Left hand side width in monospace unicode characters
-
-        while elapsed >= 10:  # Increase LHS for each digit of elapsed time
-            elapsed %= 10
-            lhs += 1
-
-        rhs = cols - lhs - 2  # Right hand side width
-        bpl = rhs // 4  # Bytes displayed per line
-        brkline = '-' * cols + '\n'  # Line of hyphens
-        line_format = '{' + f': <{lhs}' + '}| {' + f': <{rhs}' + '}\n'
-        txt = brkline + line_format.format(f'{time.time()-SCRIPT_START:.2f}s', key)
-        sep = ', '
-
-        for direction, data in (('IN', incoming), ('OUT', outgoing)):
-            nlines, rem = divmod(len(data), bpl)
-            nlines += rem > 0
-            for i in range(nlines):
-                linedata = sep.join('%02X' % c for c  in data[i*bpl:(i+1)*bpl])
-                line = line_format.format(f'{direction}[{i}]', linedata)
-                txt += line
-            if nlines:
-                txt += brkline
-
-        print(txt)
 
 
 if __name__ == '__main__':
