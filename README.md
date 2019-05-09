@@ -1,5 +1,8 @@
 # Telemetry-via-DigiMesh
-Simple scripts that enable XBee radios with DigiMesh firmware to be used as telemetry radios for UAV operations
+Digi XBee Pro 868/900 radio modules offer similar hardware specifications to most of the telemetry radios that are supported by PX4.  However, XBee's can be loaded with a mesh networking firmware called DigiMesh that allows for multiple units to be connected to one network, where each can be configured as a router, relay or endpoint.  Ready-to-go mesh networking, low cost, 200kbps Tx/Rx and industry, scientific and medical (ISM) radio band operation make XBee radios ideal for prototying Swarm unmanned aerial vehicle (UAV) systems with low over-the-air data-rate requirements.  Despite this, the PX4's PixHawk Firmware and ground control station (GCS) software have both dropped direct interface support for the XBee radio.  Therefore, this repository was spawned to provide a simple and (mostly) hands-off software adapter to bridge XBee radio hardware with both the PixHawk and QGroundControl, without altering the software for either.  This allows one GCS to control multiple UAVs over a singular mesh network. 
+
+
+The repository was created to support a Master of Engineering (ME) project, where one GCS will be used to control multiple UAVs.  One or more UAVs will be flying within line of sight (LOS) at a moderate to high altitude with the purpose of acting as an airbourne communications relay for one or more low-altitude UAVs, all flying beyond the visual line of sight (BVLOS) and tasked with data collection.
 
 ## License
 This repository inherits two licenses from pre-requisite third-party libraries:
@@ -37,9 +40,6 @@ development, but other versatile GCS software such as [Mission
 Planner](https://github.com/ArduPilot/MissionPlanner) should be able to interface with these 
 scripts easily.
 
-## Windows 10
-(Coming soon)
-
 ## Usage
 The purpose of these scripts are to enable the use of XBee DigiMesh without the need to 
 modify the Pixhawk PX4 firmware, or compiling a custom build for GCS software.  
@@ -55,6 +55,7 @@ defined port (UDP server hosted by GCS software).
 Currently, these scripts have one purpose - to create multiple one-to-one GCS to vehicle MAVLink 
 connections that share the same wireless DigiMesh network and one common GCS XBee radio.  However, 
 future commits will aim to improve the usefulness, versatility and reliability of these scripts.  
+
 Below is a prioritized list of TODOs as of April 1<sup>st</sup> 2019:
 
 1. Prevent threads from crashing when UDP servers are closed.  Attempt to reconnect.
