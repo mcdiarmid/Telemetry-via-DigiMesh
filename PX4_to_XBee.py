@@ -76,7 +76,7 @@ def main():
 
 			# Break data up into packets of maximum length XBEE_PKT_MAX
 			while data:
-				pkt_data, data[:] = data[:XBEE_PKT_MAX], data[XBEE_PKT_MAX:]
+				pkt_data, data = data[:XBEE_PKT_MAX], data[XBEE_PKT_MAX:]
 				pkt_sent = xb.send_data(gcs, pkt_data)
 
 		# Reset input buffer if overflow has occurred
