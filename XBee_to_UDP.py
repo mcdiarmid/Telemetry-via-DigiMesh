@@ -42,6 +42,7 @@ XBEE_MAX_BAUD = 230400
 PX4_DEFAULT_BAUD = 115200
 KiB = 1024
 SER_BUF_LIMIT = 0xFFF
+UDP_TX_THREAD_NAME = 'UDP Tx Thread'
 
 
 ########################################################################################################################
@@ -55,6 +56,7 @@ class XBee2UDP(object):
     def __init__(self, connections, serial_port='/dev/ttyUSB0', baud_rate=XBEE_MAX_BAUD, **kwargs):
         """
         Version 2 of the XBee to UDP class
+
         :param connections: A list of tuples containing expected UDP connections and associated XBee node IDs
         :param serial_port: Device location
         :param baud_rate: Baud rate
@@ -77,15 +79,19 @@ class XBee2UDP(object):
         self.xbee = XBeeDevice(port=serial_port, baud_rate=baud_rate, **kwargs)
         time.sleep(0.01)
         self.xbee.open()
-        time.sleep(0.01)
-
         self.running = False
+        self._udp_tx_closed = True
         self.network = None
         self.start_time = 0
 
     def start(self):
+        """
+        Starts all processes and threads in appropriate order
+        TODO daemon=True necessary?
+        """
         # Initialize network and discover devices (blocks other functionality and takes a while)
         self.network = self.xbee.get_network()
+        self.running = True
 
         def callback(remote):
             print(f'Discovered: {remote.get_node_id()}')
@@ -95,27 +101,57 @@ class XBee2UDP(object):
         while self.network.is_discovery_running():
             time.sleep(0.1)
 
-        # Spawn UDP threads for each connection
+        # Spawn UDP Rx threads for each connection
         for node_id in self.connections:
-            if node_id in self.network.get_device_by_node_id(node_id):
+            if self.network.get_device_by_node_id(node_id):
                 ip, port = self.connections[node_id]
-                _thread = threading.Thread(target=self._udp_rx_thread, args=(node_id, ip, port), daemon=True)
-                _thread.start()
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.connect((ip, port))
+                self.sockets[node_id] = sock
+                _udp_rx_thread_x = threading.Thread(
+                    target=self._udp_rx_thread, args=(node_id,), daemon=True)
+                _udp_rx_thread_x.start()
             else:
                 print(f'Device {node_id} not found')
 
+        # Spawn UDP Tx thread
+        _udp_tx_thread = threading.Thread(target=self._udp_tx_thread, daemon=True)
+        _udp_tx_thread.start()
+
         # Once discovery has successfully completed, begin main loop
-        self.running = True
         self.start_time = time.time()
-        _thread = threading.Thread(target=self.service_loop, daemon=True)
-        _thread.start()
+        _service_thread = threading.Thread(target=self.service_loop, daemon=True)
+        _service_thread.start()
 
     def close(self):
+        """
+        Sets while-loop conditions to False for all threads, so each will run to completion and appropriate clean-up
+        processes will be executed prior to the script terminating.
+        """
         self.running = False
 
     def service_loop(self):
+        """
+        Primary loop for servicing and passing data to the correct place.
+        Each loop iterates through all known devices in the network. Inside each loop:
+        I.  for device in devices:
+            1. Obtain Node ID of the device
+            2. Receive packet:  TODO possibly change to service ALL packets in queue, similar to Tx.
+                a.  Pop the oldest packet queued from that particular device
+                b.  Obtain useful information if the packet is not empty
+                c.  Convert from bytearray to bytes and place into a queue for UDP transmission to GCS software
+            3. Transmit packet(s):  TODO possibly change to service ONE packet (or some N packets) in queue, like Rx.
+                a.  Read queued data for transmission to the device to the variable: outgoing.
+                    clear self.queue_out[node_id] on the same line.
+                b.  Send up to the oldest XBEE_PKT_MAX bytes of to the device.
+                c.  Delete the bytes sent from outgoing through slicing.
+                d.  Repeat b. and c. if outgoing != b''
+        II.  TODO Check incoming broadcasts
+        III. TODO Send any broadcasts to all devices if necessary
+        IV.  Short sleep before next loop.
+        """
         while self.running:
-            # Iterate through devices
+            # Service explicit messages
             for device in self.network.get_devices():
                 node_id = device.get_node_id()
 
@@ -131,43 +167,48 @@ class XBee2UDP(object):
                     tx_packet = self.xbee.send_data(device, outgoing[:XBEE_PKT_MAX])
                     outgoing = outgoing[XBEE_PKT_MAX:]
 
-            # Check general broadcasts TODO
-
             # Wait between loops
             time.sleep(0.001)
 
-        # Tidy up
-        for sock in self.sockets:
-            sock.close()
         self.xbee.close()
 
-    def _udp_rx_thread(self, node_id: str, ip: str, port: int):
+    def _udp_rx_thread(self, node_id: str):
         """
-        
-        :param node_id: Unique name associated with a remote XBee device, string representation
-        :param ip: IP address (typically "127.0.0.1"), string representation
-        :param port: Port number, integer representation
-        """
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.connect((ip, port))
-        self.sockets[node_id] = sock
+        One thread is created for each UDP-XBee connection required, as socket.recvfrom() is a blocking function, and
+        will wait until data has been received from QGroundControl (or other GCS software).  By doing this, new data
+        that is forwarded on from the XBee to QGroundControl is not held up by the recvfrom function.
 
+        :param node_id: Unique name associated with a remote XBee device, string representation
+        """
+        print(f'Started UDP Rx Thread for {node_id}')
+        # Thread Main Loop
         while self.running:
-            data = sock.recvfrom(KiB)
+            data = self.sockets[node_id].recvfrom(KiB)
             self.queue_out[node_id] += data
             time.sleep(0.001)
+
+        # Wait until the UDP Tx thread has terminated before closing UDP socket
+        while not self._udp_tx_closed:
+            time.sleep(0.001)
+
+        self.sockets[node_id].close()
 
     def _udp_tx_thread(self):
         """
         UDP transmission thread that iterates through the queues of each remote XBee device by Node ID and sends any
         data directly along the associated UDP socket to QGroundControl or other GCS.
         """
+        print(f'Started UDP Tx Thread')
+        self._udp_tx_closed = False
+
         while self.running:
             for node_id in self.queue_in:
-                if self.queue_in[node_id] and self.sockets[node_id]:
+                if self.queue_in[node_id]:
                     bytes_sent = self.sockets[node_id].send(self.queue_in[node_id])
                     self.queue_in[node_id] = self.queue_in[node_id][bytes_sent:]
             time.sleep(0.001)
+
+        self._udp_tx_closed = True
 
 
 class XBeeToUDP(XBeeDevice):
@@ -193,8 +234,7 @@ class XBeeToUDP(XBeeDevice):
 
     def start(self):
         """
-
-        :return:
+        TODO
         """
         self.open()
         time.sleep(0.1)
@@ -204,16 +244,14 @@ class XBeeToUDP(XBeeDevice):
 
     def close(self):
         """
-
-        :return:
+        TODO
         """
         # Set while loop conditions to False for all threads finish executing
         self.running = False
 
     def primary_loop(self):
         """
-
-        :return:
+        TODO
         """
         # Discover devices on the mesh network
         mesh = self.get_network()
@@ -285,7 +323,7 @@ class XBeeToUDP(XBeeDevice):
 
     def udp_thread(self, key):
         """
-
+        TODO
         :param key:
         :return:
         """
@@ -316,9 +354,13 @@ class XBeeToUDP(XBeeDevice):
         _thread.start()
 
 
-if __name__ == '__main__':
+def main():
     # TODO: Add command line argument passing
-    xb = XBeeToUDP('/dev/ttyUSB0', XBEE_MAX_BAUD)
+    # xb = XBeeToUDP('/dev/ttyUSB0', XBEE_MAX_BAUD)
+    uav_xbee_lut = {
+        'Worker #1': ('127.0.0.1', 14555),
+    }
+    xb = XBee2UDP(uav_xbee_lut, serial_port='/dev/ttyUSB0', baud_rate=XBEE_MAX_BAUD)
     xb.start()
 
     try:
@@ -326,3 +368,7 @@ if __name__ == '__main__':
             time.sleep(0.5)
     except (KeyboardInterrupt, SystemExit):
         xb.close()
+
+
+if __name__ == '__main__':
+    main()
