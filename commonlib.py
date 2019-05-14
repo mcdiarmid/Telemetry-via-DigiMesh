@@ -18,7 +18,7 @@ def device_finder(name):
     return dev_port
 
 
-def print_msg(key, start, incoming=b'', outgoing=b''):
+def print_msg(name, start, data, is_incoming=True):
     # Formats incoming and outgoing messages to fit the terminal window
     cols, rows = os.get_terminal_size()
     elapsed = time.time() - start
@@ -32,17 +32,18 @@ def print_msg(key, start, incoming=b'', outgoing=b''):
     bpl = rhs // 4  # Bytes displayed per line
     brkline = '-' * cols + '\n'  # Line of hyphens
     line_format = '{' + f': <{lhs}' + '}| {' + f': <{rhs}' + '}\n'
-    txt = brkline + line_format.format(f'{time.time() - start:.2f}s', key)
+    txt = brkline + line_format.format(f'{time.time() - start:.2f}s', name)
     sep = ', '
 
-    for direction, data in (('IN', incoming), ('OUT', outgoing)):
-        nlines, rem = divmod(len(data), bpl)
-        nlines += rem > 0
-        for i in range(nlines):
-            linedata = sep.join('%02X' % c for c in data[i * bpl:(i + 1) * bpl])
-            line = line_format.format(f'{direction}[{i}]', linedata)
-            txt += line
-        if nlines:
-            txt += brkline
+    direction = 'IN' if is_incoming else 'OUT'
+
+    nlines, rem = divmod(len(data), bpl)
+    nlines += rem > 0
+    for i in range(nlines):
+        linedata = sep.join('%02X' % c for c in data[i * bpl:(i + 1) * bpl])
+        line = line_format.format(f'{direction}[{i}]', linedata)
+        txt += line
+    if nlines:
+        txt += brkline
 
     print(txt)
