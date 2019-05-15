@@ -44,7 +44,7 @@ KiB = 1024
 SER_BUF_LIMIT = 0xFFF
 REMOTE_DEVICE_IDS = {
     '0013a20040d68c32': 'Worker #1',
-    '0013a20041520335': 'xx',
+    '0013a20041520335': 'Navi #3',
 }
 
 
@@ -175,13 +175,13 @@ class XBee2UDP(object):
                 if rx_packet is not None:
                     incoming = bytes(rx_packet.data)
                     self.queue_in[key] += incoming
-                    # print_msg(name=REMOTE_DEVICE_IDS[key], start=self.start_time, data=incoming, is_incoming=True)
+                    print_msg(name=REMOTE_DEVICE_IDS[key], start=self.start_time, data=incoming, is_incoming=True)
 
                 # Service new data from UDP connections
                 outgoing, self.queue_out[key] = self.queue_out[key], b''
                 while outgoing:
                     self.xbee.send_data(device, outgoing[:XBEE_PKT_MAX])
-                    # print_msg(name=REMOTE_DEVICE_IDS[key], start=self.start_time, data=outgoing, is_incoming=False)
+                    print_msg(name=REMOTE_DEVICE_IDS[key], start=self.start_time, data=outgoing, is_incoming=False)
                     outgoing = outgoing[XBEE_PKT_MAX:]
 
             # Wait between loops
@@ -203,8 +203,10 @@ class XBee2UDP(object):
             try:
                 data, _ = self.sockets[key].recvfrom(KiB)
                 self.queue_out[key] += data
-            except (ConnectionRefusedError, socket.timeout) as e:
-                print(f'{e}: No response from GCS.  Please reconnect {self.connections[key]}.')
+            except ConnectionRefusedError as e:
+                print(f'{e}: Please reconnect {self.connections[key]} in GCS')
+            except socket.timeout as e:
+                print(f'{e}: Check XBee-PX4 script on {REMOTE_DEVICE_IDS[key]}')
             time.sleep(0.001)
 
         # Wait until the UDP Tx thread has terminated before closing UDP socket
@@ -227,8 +229,8 @@ class XBee2UDP(object):
                     try:
                         bytes_sent = self.sockets[key].send(self.queue_in[key])
                         self.queue_in[key] = self.queue_in[key][bytes_sent:]
-                    except ConnectionRefusedError:
-                        print('Connection REFUSED')
+                    except ConnectionRefusedError as e:
+                        print(f'{e}: Please reconnect {self.connections[key]} in GCS')
             time.sleep(0.001)
 
         self._udp_tx_closed = True
