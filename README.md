@@ -37,7 +37,6 @@ cp 66-xbee.rules /etc/udev/rules.d/66-xbee.rules
 cp 67-pixhawk.rules /etc/udev/rules.d/67-pixhawk.rules
 udevadm control --reload && udevadm trigger
 ```
-(TODO)
 
 [QGroundControl](https://github.com/mavlink/qgroundcontrol) has been the GCS software of choice 
 throughout 

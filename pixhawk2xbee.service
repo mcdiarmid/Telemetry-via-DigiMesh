@@ -1,0 +1,8 @@
+[Unit]
+Description=Pixhawk to XBee script.
+
+[Service]
+ExecStart=/usr/local/bin/pixhawk2xbee
+
+[Install]
+WantedBy=multi-user.target 
