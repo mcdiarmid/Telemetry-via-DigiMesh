@@ -12,26 +12,30 @@ https://github.com/pyserial/pyserial/blob/master/LICENSE.txt
 2. python-xbee (Also dependant on pySerial): MPL 2.0 - https://github.com/digidotcom/python-xbee/blob/master/LICENSE.txt
 
 ## Linux Installation
-Python3 - Arch based Linux Operating Systems:
+Python3 - Arch based Linux Operating Systems (Python 3.7 is installed by default on fresh Arch based install):
 
 ```bash
-sudo pacman -S python python-pip
+# pacman -S python python-pip
 ```
 
 Debian based Linux Operating Systems:
 
 ```bash
-sudo apt-get install python3 python3-pip
+# apt-get install python3 python3-pip
 ```
 
 Python3 libraries:
 
 ```bash
-sudo pip3 install digi-xbee pyserial
+# pip3 install digi-xbee pyserial
 ```
 
-XBee device rules installation:
+Device rules installation (requires root):
 
+'''bash
+# cp 66-xbee.rules /etc/udev/rules.d/66-xbee.rules
+# udevadm control --reload && udevadm trigger
+'''
 (TODO)
 
 [QGroundControl](https://github.com/mavlink/qgroundcontrol) has been the GCS software of choice 
