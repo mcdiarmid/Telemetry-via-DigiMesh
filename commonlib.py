@@ -1,21 +1,36 @@
 import os
+import platform
 import time
 import serial.tools.list_ports as list_ports
 
 
-def device_finder(name):
-    dev_port = None
-    while dev_port is None:
+def _device_finder_linux(name):
+    while True:
         for comport in list_ports.comports():
-            if name in comport.product:
-                dev_port = comport.device
-        if dev_port:
-            print('{} found'.format(name))
-        else:
-            print('List of Comports: {}'.format(list_ports.comports()))
-            print('Please insert {} device'.format(name))
-            time.sleep(5)
-    return dev_port
+            if comport.product:
+                if name in comport.product:
+                    print(f'{name} found')
+                    return comport.device
+        print(f'List of Comports: {list_ports.comports()}')
+        print(f'Please insert {name} device')
+        time.sleep(5)
+
+
+def _device_finder_windows(name):
+    while True:
+        for comport in list_ports.comports():
+            if comport.device == 'COM3':  # TODO Ugly code but temporary
+                print(f'{name} found')
+                return comport.device
+        print(f'List of Comports: {list_ports.comports()}')
+        print(f'Please insert {name} device')
+        time.sleep(5)
+
+
+if platform.system() == 'Linux':
+    device_finder = _device_finder_linux
+elif platform.system() == 'Windows':
+    device_finder = _device_finder_windows
 
 
 def print_msg(name, start, data, is_incoming=True):

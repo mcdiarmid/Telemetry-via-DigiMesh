@@ -15,7 +15,7 @@ import socket
 import time
 import threading
 from digi.xbee.devices import XBeeDevice
-from commonlib import print_msg
+from commonlib import print_msg, device_finder
 
 
 ########################################################################################################################
@@ -25,7 +25,7 @@ from commonlib import print_msg
 ########################################################################################################################
 
 
-# Localhost IP and arbirtarily defined based port
+# Localhost IP and arbitrarily defined based port
 LOCALHOST = '127.0.0.1'
 UDP_PORT = 14555
 UDP_IP = LOCALHOST
@@ -242,7 +242,8 @@ def main():
         '0013a20040d68c32': (LOCALHOST, 14555),
         '0013a20041520335': (LOCALHOST, 14556),
     }
-    xb = XBee2UDP(uav_xbee_lut, serial_port='/dev/ttyUSB0', baud_rate=XBEE_MAX_BAUD)
+    xb_port = device_finder('XBee')
+    xb = XBee2UDP(uav_xbee_lut, serial_port=xb_port, baud_rate=XBEE_MAX_BAUD)
     xb.start()
 
     try:
