@@ -28,7 +28,7 @@ SERIAL_BUFFER_MAX = 0xFFF
 ARBITRARY_MIN = 100
 XBEE_MAX_BAUD = 230400
 PX4_DEFAULT_BAUD = 115200
-
+GCS_64BIT_ADDR = '0013a20040d68c2e'
 
 ########################################################################################################################
 #
@@ -50,8 +50,9 @@ def obtain_network(xbee: XBeeDevice):
 
 		# Check devices on the network by Node ID
 		for device in network.get_devices():
-			print('XBee device found with Node ID: {}'.format(device.get_node_id()))
-			if device.get_node_id() == 'GCS':
+			address = device.get_64bit_addr().address.hex()
+			print(f'XBee device found with 64bit address: {address}')
+			if address == GCS_64BIT_ADDR:
 				return device, network
 
 
