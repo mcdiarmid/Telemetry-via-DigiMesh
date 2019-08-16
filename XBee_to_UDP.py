@@ -16,6 +16,7 @@ import time
 import threading
 from digi.xbee.devices import XBeeDevice
 from commonlib import print_msg, device_finder
+from pymavlink import mavutil
 
 
 ########################################################################################################################
@@ -43,7 +44,7 @@ PX4_DEFAULT_BAUD = 115200
 KiB = 1024
 SER_BUF_LIMIT = 0xFFF
 REMOTE_DEVICE_IDS = {
-    '0013a20040d68c32': 'Worker #1',
+    '0013a20040e2ab74': 'Worker #1',
     '0013a20041520335': 'Navi #3',
 }
 
@@ -74,18 +75,16 @@ class XBee2UDP(object):
         else:
             raise TypeError('Expected an iterable of tuples (key, ip, port), or dict of tuples key: (ip, port)')
 
-        self.queue_in = {key: b'' for key in self.connections}
-        self.queue_out = {key: b'' for key in self.connections}
+        self.queue_in = {}
+        self.queue_out = {}
         self.sockets = {}
 
         # Initialize XBee device connection
         self.xbee = XBeeDevice(port=serial_port, baud_rate=baud_rate, **kwargs)
-        time.sleep(0.01)
         self.xbee.open()
         self.running = False
         self._udp_tx_closed = True
         self.network = None
-        self.start_time = 0
         self.udp_timeout = udp_timeout
 
     def start(self):
@@ -95,9 +94,16 @@ class XBee2UDP(object):
         """
         # Initialize network and discover devices (blocks other functionality and takes a while)
         print('Discovering remote devices...')
+
+        def callback(remote):
+            print(remote.get_node_id(), remote.get_64bit_addr())
+
         self.network = self.xbee.get_network()
+        self.network.add_device_discovered_callback(callback)
         self.running = True
+        self.network.set_discovery_timeout(5)
         self.network.start_discovery_process()
+
         while self.network.is_discovery_running():
             time.sleep(0.1)
 
@@ -125,7 +131,11 @@ class XBee2UDP(object):
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(self.udp_timeout)
             sock.connect((ip, port))
+            self.queue_in[key] = b''
+            self.queue_out[key] = b''
+            print(sock)
             self.sockets[key] = sock
+            print(self.sockets)
             _udp_rx_thread_x = threading.Thread(target=self._udp_rx_thread, args=(key,), daemon=True)
             _udp_rx_thread_x.start()
 
@@ -134,7 +144,6 @@ class XBee2UDP(object):
         _udp_tx_thread.start()
 
         # Once discovery has successfully completed, begin main loop
-        self.start_time = time.time()
         _service_thread = threading.Thread(target=self._xbee_thread, daemon=True)
         _service_thread.start()
 
@@ -165,6 +174,12 @@ class XBee2UDP(object):
         III. TODO Send any broadcasts to all devices if necessary
         IV.  Short sleep before next loop.
         """
+        _bytes_in = 0
+        _bytes_out = 0
+        _loops = 0
+        _start_time = time.time()
+        _loop_sleep = 0.0001
+        _loop_hz = int(1/_loop_sleep)
         while self.running:
             # Service explicit messages
             for device in self.network.get_devices():
@@ -172,20 +187,28 @@ class XBee2UDP(object):
 
                 # Service new packets from the XBee
                 rx_packet = self.xbee.read_data_from(device)
-                if rx_packet is not None:
+                while rx_packet:
+                    _before = time.time()
                     incoming = bytes(rx_packet.data)
+                    print_msg(key, _start_time, incoming)
                     self.queue_in[key] += incoming
-                    print_msg(name=REMOTE_DEVICE_IDS[key], start=self.start_time, data=incoming, is_incoming=True)
+                    _bytes_in += len(incoming)
+                    rx_packet = self.xbee.read_data_from(device)
 
                 # Service new data from UDP connections
                 outgoing, self.queue_out[key] = self.queue_out[key], b''
                 while outgoing:
                     self.xbee.send_data(device, outgoing[:XBEE_PKT_MAX])
-                    print_msg(name=REMOTE_DEVICE_IDS[key], start=self.start_time, data=outgoing, is_incoming=False)
+                    _bytes_out += len(outgoing[:XBEE_PKT_MAX])
                     outgoing = outgoing[XBEE_PKT_MAX:]
+                    print_msg(key, _start_time, outgoing)
 
             # Wait between loops
-            time.sleep(0.001)
+            if not _loops % _loop_hz:
+                print(f'IN: {8*_bytes_in/(time.time() - _start_time):.2f}bps, '
+                      f'OUT: {8*_bytes_out/(time.time() - _start_time):.2f}bps')
+            _loops += 1
+            time.sleep(0.0001)
 
         self.xbee.close()
 
@@ -211,7 +234,7 @@ class XBee2UDP(object):
 
         # Wait until the UDP Tx thread has terminated before closing UDP socket
         while not self._udp_tx_closed:
-            time.sleep(0.001)
+            time.sleep(0.01)
 
         self.sockets[key].close()
 
@@ -225,13 +248,13 @@ class XBee2UDP(object):
 
         while self.running:
             for key in self.queue_in:
-                if self.queue_in[key]:
-                    try:
+                try:
+                    if self.queue_in[key]:
                         bytes_sent = self.sockets[key].send(self.queue_in[key])
                         self.queue_in[key] = self.queue_in[key][bytes_sent:]
-                    except ConnectionRefusedError as e:
-                        print(f'{e}: Please reconnect {self.connections[key]} in GCS')
-            time.sleep(0.001)
+                except ConnectionRefusedError as e:
+                    print(f'{e}: Please reconnect {self.connections[key]} in GCS')
+            time.sleep(0.01)
 
         self._udp_tx_closed = True
 
@@ -240,7 +263,7 @@ def main():
     # TODO: Add command line argument passing
     uav_xbee_lut = {
         '0013a20040d68c32': (LOCALHOST, 14555),
-        '0013a20041520335': (LOCALHOST, 14556),
+        # '0013a20041520335': (LOCALHOST, 14556),
     }
     xb_port = device_finder('XBee')
     xb = XBee2UDP(uav_xbee_lut, serial_port=xb_port, baud_rate=XBEE_MAX_BAUD)
@@ -248,7 +271,7 @@ def main():
 
     try:
         while True:
-            time.sleep(0.5)
+            time.sleep(0.1)
     except (KeyboardInterrupt, SystemExit):
         xb.close()
 
