@@ -37,7 +37,7 @@ PX4_MAV_PERIODS = {
 	'COMMAND_LONG':	       		1,
 	'ATTITUDE_QUATERNION': 		1,
 	'ACTUATOR_CONTROL_TARGET': 	1,
-	'TIMESYNC':	       			1,
+	'TIMESYNC':	       		1,
 	'SYSTEM_TIME':         		1,
 	'VFR_HUD':             		0.625,
 	'HEARTBEAT':           		1,
@@ -53,6 +53,7 @@ PX4_MAV_PERIODS = {
 	'VIBRATION':           		5,
 	'PING':                		10,
 }
+MAV_IGNORES = ['BAD_DATA', 'ODOMETRY']  # TODO: temporary, haven't fully investigated whether all of these should be "ignored"
 MAV_SEQ_BYTE = 2
 
 ########################################################################################################################
@@ -70,12 +71,24 @@ class Fifo(object):
 	def __init__(self):
 		self.buf = []
 
-	def write(self, _data):
+	def write(self, data):
 		self.buf += data
 		return len(data)
 
 	def read(self):
 		return self.buf.pop(0)
+
+
+class MAVQueue(object):
+	def __init__(self):
+		self.buf = []
+	def write(self, mav_msg):
+		self.buf.append(mav_msg)
+		return 1
+	def read(self):
+		return self.buf.pop(0)
+	def has_mav(self):
+		return len(self.buf) > 0
 
 
 def obtain_network(xbee: XBeeDevice):
@@ -103,7 +116,7 @@ def obtain_network(xbee: XBeeDevice):
 				return device, network
 
 
-def mav_rx_thread(mav_device: mavutil.mavserial, sleep_time=0.0005):
+def mav_rx_thread(mav_device: mavutil.mavserial, priority_queue: MAVQueue, sleep_time=0.0005):
 	"""
 	This function serves the purpose of receiving messages from the flight controller at such a rate that no buffer
 	overflow occurs.  When mav_device.recv_msg() is called, if enough data has come in from the serial connection to
@@ -112,13 +125,16 @@ def mav_rx_thread(mav_device: mavutil.mavserial, sleep_time=0.0005):
 	of MAVLink packet, effectively decimating the stream to a set rate for each type of MAVLink message.
 
 	:param mav_device: MAVLink serial connection object
+	:param priority_queue: Queue for messages that come through as a result of a GCS request
 	:param sleep_time: Sleep time between loops TODO: this should probably be a function of PX4_COMPANION_BAUD
 	"""
+	print(f'Started MAVLink Rx Thread')
 	while True:  # Loop forever
 		m = mav_device.recv_msg()
 		if m:
-			if m.get_type() not in PX4_MAV_PERIODS and m.get_type() != 'BAD_DATA':
-				print(m.get_type())  # Let us known when a message arrives that we haven't scheduled for transmission
+			# TODO will likely need another array of MAV types to exempt from this queue
+			if m.get_type() not in PX4_MAV_PERIODS and m.get_type() not in MAV_IGNORES:
+				priority_queue.write(m)
 		time.sleep(sleep_time)
 
 
@@ -142,15 +158,28 @@ if __name__ == '__main__':
 
 	# MAVLink parsing object - useful for encoding/decoding messages
 	mav = mavlink.MAVLink(Fifo())
+	
+	# Priority Queue for servicing GCS requests
+	priority_queue = MAVQueue()
+	data = b''
 
 	# Separate thread for constantly receiving and parsing new MAVLink packets from the flight controller
-	_parse_thread = threading.Thread(target=mav_rx_thread, args=(px4,), daemon=True)
+	_parse_thread = threading.Thread(target=mav_rx_thread, args=(px4, priority_queue,), daemon=True)
 	_parse_thread.start()
 
 	# Infinite loop for bridging serial connection between PixHawk and XBee
+	print(f'Started main message handling loop')
 	while True:
+		# Check priority queue
+		while priority_queue.has_mav():
+			msg = priority_queue.read()
+			print(f'Priority message of type: {msg.get_type()}')
+			msg_byte_array = msg.get_msgbuf()			
+			msg_byte_array[MAV_SEQ_BYTE] = seq_counter % 255
+			data += bytes(msg_byte_array)
+			seq_counter += 1
+
 		# Check whether messages are scheduled for transmission
-		data = b''
 		for mav_type in PX4_MAV_PERIODS:
 			if time.time() >= next_times[mav_type]:
 				next_times[mav_type] = time.time() + PX4_MAV_PERIODS[mav_type]
@@ -174,7 +203,30 @@ if __name__ == '__main__':
 		message = xb.read_data_from(gcs)
 		if message:
 			data = message.data
-			print(mav.decode(data))
+			try:
+				gcs_msg = mav.decode(data)
+				msg_type = gcs_msg.get_type()
+				print(f'GCS message of type: {msg_type}')
+			except mavlink.MAVError:
+				continue
+
+			if msg_type == 'HEARTBEAT':
+				"""
+				TODO: HEARTBEAT reply/"acknowledgement"
+				Need to manually construct a RADIO_STATUS MAVLink message and place it at the front of 
+				priority_queue, as RADIO_STATUS messages are automatically constructed and sent back to the 
+				GCS on SiK radio firmware in response to a HEARTBEAT.  This is crucial for establishing a
+				recognisable link on GCS software, such as QGroundControl.
+				"""
+				# TODO Currently using a fake message filled with values from a template RADIO_STATUS message
+				# TODO some of these values should be obtainable via the XBee api, will investigate
+				# TODO mav.radio_status_encode() for whatever reason returns a message with no msgbuffer
+				# TODO May need to manually add get_msgbuf() functionality
+				radio_status_msg = mav.radio_status_encode(rssi=210, remrssi=215, txbuf=100, noise=51, remnoise=41, rxerrors=0, fixed=0)
+				priority_queue.write(radio_status_msg)  
+			elif msg_type == 'BAD_DATA':
+				continue
+			
 			px4.write(data)
 
 		# TODO Make this a function of something, e.g. related to blocking time of ~3.7ms for a 255 byte Tx + ACK
