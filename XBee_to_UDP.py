@@ -204,8 +204,8 @@ class XBee2UDP(object):
 
             # # Wait between loops
             if not _loops % _loop_hz:
-                print(f'\rIN: {8*_bytes_in/(time.time() - _start_time):10>.2f}bps, '
-                      f'OUT: {8*_bytes_out/(time.time() - _start_time):10>.2f}bps', end='', flush=True)
+                print(f'\rIN: {8*_bytes_in/(time.time() - _start_time):>10.2f}bps, '
+                      f'OUT: {8*_bytes_out/(time.time() - _start_time):>10.2f}bps', end='', flush=True)
             _loops += 1
             time.sleep(0.0001)
 
@@ -255,7 +255,7 @@ def main():
     # TODO: Add command line argument passing
     uav_xbee_lut = {
         '0013a20040d68c32': (LOCALHOST, 14555),
-        # '0013a20041520335': (LOCALHOST, 14556),
+        '0013a20041520335': (LOCALHOST, 14556),
     }
     xb_port = device_finder('XBee')
     xb = XBee2UDP(uav_xbee_lut, serial_port=xb_port, baud_rate=XBEE_MAX_BAUD)
