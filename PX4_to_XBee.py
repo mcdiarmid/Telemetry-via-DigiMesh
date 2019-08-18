@@ -15,7 +15,7 @@ import time
 import threading
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
-from commonlib import device_finder, MAVQueue
+from commonlib import device_finder, MAVQueue, Fifo
 
 
 ########################################################################################################################
@@ -130,6 +130,7 @@ if __name__ == '__main__':
 	
 	# Priority Queue for servicing GCS requests
 	priority_queue = MAVQueue()
+	parser = mavlink.MAVLink(Fifo())
 
 	# Separate thread for constantly receiving and parsing new MAVLink packets from the flight controller
 	_parse_thread = threading.Thread(target=mav_rx_thread, args=(px4, priority_queue,), daemon=True)
@@ -168,7 +169,10 @@ if __name__ == '__main__':
 		while tx_buffer:
 			pkt_data, tx_buffer = tx_buffer[:XBEE_PKT_MAX], tx_buffer[XBEE_PKT_MAX:]
 			pkt_sent = xb.send_data(gcs, pkt_data)
-
+			try:
+				parser.parse_buffer(pkt_data)
+			except mavlink.MAVError as e:
+				print(e)
 		# Read XBee, Write to PX4
 		message = xb.read_data_from(gcs)
 		if message:
