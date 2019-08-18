@@ -2,23 +2,11 @@ import os
 import platform
 import time
 import serial.tools.list_ports as list_ports
-from pymavlink.mavutil import x25crc
+import struct
+from pymavlink.generator.mavcrc import x25crc
+
 
 MAVLINK_SEQ_BYTE = 4
-MAVLINK_MESSAGE_CRCS = (
-    50, 124, 137, 0, 237, 217, 104, 119, 0, 0, 0, 89, 0, 0, 0, 0, 0, 0, 0, 0,
-    214, 159, 220, 168, 24, 23, 170, 144, 67, 115, 39, 246, 185, 104, 237, 244,
-    242, 212, 9, 254, 230, 28, 28, 132, 221, 232, 11, 153, 41, 39, 214, 223,
-    141, 33, 15, 3, 100, 24, 239, 238, 30, 240, 183, 130, 130, 0, 148, 21, 0,
-    243, 124, 0, 0, 0, 20, 0, 152, 143, 0, 0, 127, 106, 0, 0, 0, 0, 0, 0, 0,
-    231, 183, 63, 54, 0, 0, 0, 0, 0, 0, 0, 175, 102, 158, 208, 56, 93, 0, 0, 0,
-    0, 235, 93, 124, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 42, 241, 15, 134, 219, 208,
-    188, 84, 22, 19, 21, 134, 0, 78, 68, 189, 127, 111, 21, 21, 144, 1, 234,
-    73, 181, 22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 204, 49, 170, 44, 83, 46, 0)
 
 
 class Fifo(list):
@@ -134,6 +122,7 @@ def replace_seq(msg, seq):
     data = msg.get_msgbuf()
     data[MAVLINK_SEQ_BYTE] = seq % 255
     cc = x25crc(bytes(data)[1:-2])
-    cc.accumulate(MAVLINK_MESSAGE_CRCS[msg.get_msgId()])
+    if msg.crc_extra:
+        cc.accumulate(struct.pack('B', msg.crc_extra))
     data[-2], data[-1] = cc.crc & 0xFF, cc.crc >> 8
     return bytes(data)
