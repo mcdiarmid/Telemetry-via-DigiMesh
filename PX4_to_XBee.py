@@ -37,7 +37,7 @@ PX4_MAV_PERIODS = {
 	'COMMAND_LONG':	       		1,
 	'ATTITUDE_QUATERNION': 		1,
 	'ACTUATOR_CONTROL_TARGET': 	1,
-	'TIMESYNC':	       		1,
+	'TIMESYNC':	       			1,
 	'SYSTEM_TIME':         		1,
 	'VFR_HUD':             		0.625,
 	'HEARTBEAT':           		1,
@@ -53,7 +53,7 @@ PX4_MAV_PERIODS = {
 	'VIBRATION':           		5,
 	'PING':                		10,
 }
-MAV_IGNORES = ['BAD_DATA', 'ODOMETRY']  # TODO: temporary, haven't fully investigated whether all of these should be "ignored"
+MAV_IGNORES = ['BAD_DATA', 'ODOMETRY']  # TODO: temporary, haven't investigated whether these should be "ignored"
 MAV_SEQ_BYTE = 2
 
 ########################################################################################################################
@@ -82,11 +82,14 @@ class Fifo(object):
 class MAVQueue(object):
 	def __init__(self):
 		self.buf = []
+
 	def write(self, mav_msg):
 		self.buf.append(mav_msg)
 		return 1
+
 	def read(self):
 		return self.buf.pop(0)
+
 	def has_mav(self):
 		return len(self.buf) > 0
 
@@ -155,9 +158,6 @@ if __name__ == '__main__':
 	# Generate a dictionary for keeping track of when each message is scheduled to be sent next
 	next_times = {k: time.time() + PX4_MAV_PERIODS[k] for k in PX4_MAV_PERIODS}
 	seq_counter = 0
-
-	# MAVLink parsing object - useful for encoding/decoding messages
-	mav = mavlink.MAVLink(Fifo())
 	
 	# Priority Queue for servicing GCS requests
 	priority_queue = MAVQueue()
@@ -199,12 +199,11 @@ if __name__ == '__main__':
 			pkt_sent = xb.send_data(gcs, pkt_data)
 
 		# Read XBee, Write to PX4
-		# TODO: GCS Messages must be serviced appropriately to establish a control link.
 		message = xb.read_data_from(gcs)
 		if message:
 			data = message.data
 			try:
-				gcs_msg = mav.decode(data)
+				gcs_msg = px4.mav.decode(data)
 				msg_type = gcs_msg.get_type()
 				print(f'GCS message of type: {msg_type}')
 			except mavlink.MAVError:
@@ -212,17 +211,22 @@ if __name__ == '__main__':
 
 			if msg_type == 'HEARTBEAT':
 				"""
-				TODO: HEARTBEAT reply/"acknowledgement"
+				HEARTBEAT reply/"acknowledgement"
 				Need to manually construct a RADIO_STATUS MAVLink message and place it at the front of 
 				priority_queue, as RADIO_STATUS messages are automatically constructed and sent back to the 
 				GCS on SiK radio firmware in response to a HEARTBEAT.  This is crucial for establishing a
 				recognisable link on GCS software, such as QGroundControl.
 				"""
-				# TODO Currently using a fake message filled with values from a template RADIO_STATUS message
-				# TODO some of these values should be obtainable via the XBee api, will investigate
-				# TODO mav.radio_status_encode() for whatever reason returns a message with no msgbuffer
-				# TODO May need to manually add get_msgbuf() functionality
-				radio_status_msg = mav.radio_status_encode(rssi=210, remrssi=215, txbuf=100, noise=51, remnoise=41, rxerrors=0, fixed=0)
+				# TODO: RSSI, Remote RSSI, TxBuf, RxErrors and fixed should be obtainable - currently filler values
+				radio_status_msg = px4.mav.radio_status_encode(
+					rssi=210,
+					remrssi=215,
+					txbuf=100,
+					noise=51,
+					remnoise=41,
+					rxerrors=0,
+					fixed=0)
+				radio_status_msg.pack(px4.mav)
 				priority_queue.write(radio_status_msg)  
 			elif msg_type == 'BAD_DATA':
 				continue

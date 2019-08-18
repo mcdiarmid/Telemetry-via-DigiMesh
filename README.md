@@ -27,14 +27,14 @@ apt-get install python3 python3-pip
 Python3 libraries:
 
 ```bash
-pip3 install digi-xbee pyserial
+pip3 install digi-xbee pyserial pymavlink
 ```
 
 Device rules installation (requires root):
 
 ```bash
-cp 66-xbee.rules /etc/udev/rules.d/66-xbee.rules
-cp 67-pixhawk.rules /etc/udev/rules.d/67-pixhawk.rules
+cp device-rules/66-xbee.rules /etc/udev/rules.d/66-xbee.rules
+cp device-rules/67-pixhawk.rules /etc/udev/rules.d/67-pixhawk.rules
 udevadm control --reload && udevadm trigger
 ```
 
@@ -53,27 +53,3 @@ both a Pixhawk and an XBee via USB.
 * ```XBee_to_UDP.py``` acts as an interface between an XBee device and GCS software.  For each 
 XBee device connected to the mesh network, a UDP socket is created and connected to a user 
 defined port (UDP server hosted by GCS software).
-
-## TODO
-
-Currently, these scripts have one purpose - to create multiple one-to-one GCS to vehicle MAVLink 
-connections that share the same wireless DigiMesh network and one common GCS XBee radio.  However, 
-future commits will aim to improve the usefulness, versatility and reliability of these scripts.  
-
-Below is a prioritized list of TODOs as of April 1<sup>st</sup> 2019:
-
-1. Prevent threads from crashing when UDP servers are closed.  Attempt to reconnect.
-2. USB rules for GCS computer and companion computer so admin priviledges are not required to run 
-scripts.
-3. Remove magic numbers and add command line argument passing.  Overall code tidy-up.
-4. Exit scripts appropriately by closing all open ports and serial connections.
-5. Cleaner initialization process for all GCS and vehicles on the mesh network.
-6. Live console for functions to be executed during script operation.
-7. Investigate rediscovery of devices that have left the mesh network and rejoined.
-8. Non-explicit broadcasts to all devices on the network.
-9. Ensure threads that may access the same area of memory cannot do so simultaneously, 
-avoiding unnecessary crashes.
-10. Interface option for companion computer script to interface with other companion computer 
-software, as opposed to directly with the Pixhawk.
-11. Windows support for GCS script.
-12. TCP and serial options for interfacing with GCS software.
