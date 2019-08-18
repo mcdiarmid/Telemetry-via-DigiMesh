@@ -11,11 +11,11 @@ Author: Campbell McDiarmid
 ########################################################################################################################
 
 
-import socket
 import time
 import threading
 from digi.xbee.devices import XBeeDevice
-from commonlib import print_msg, device_finder
+from commonlib import print_msg, device_finder, MAVQueue, Fifo
+from pymavlink.dialects.v20 import ardupilotmega as mavlink
 from pymavlink import mavutil
 
 
@@ -77,7 +77,8 @@ class XBee2UDP(object):
 
         self.queue_in = {}
         self.queue_out = {}
-        self.sockets = {}
+        self.mav_socks = {}
+        self.parsers = {}
 
         # Initialize XBee device connection
         self.xbee = XBeeDevice(port=serial_port, baud_rate=baud_rate, **kwargs)
@@ -90,7 +91,6 @@ class XBee2UDP(object):
     def start(self):
         """
         Starts all processes and threads in appropriate order
-        TODO daemon=True necessary?
         """
         # Initialize network and discover devices (blocks other functionality and takes a while)
         print('Discovering remote devices...')
@@ -128,14 +128,10 @@ class XBee2UDP(object):
             else:
                 ip, port = self.connections[key]
 
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(self.udp_timeout)
-            sock.connect((ip, port))
-            self.queue_in[key] = b''
-            self.queue_out[key] = b''
-            print(sock)
-            self.sockets[key] = sock
-            print(self.sockets)
+            self.mav_socks[key] = mavutil.mavudp(device=f'{ip}:{port}', input=False)
+            self.queue_in[key] = MAVQueue()
+            self.queue_out[key] = MAVQueue()
+            self.parsers[key] = mavlink.MAVLink(Fifo())
             _udp_rx_thread_x = threading.Thread(target=self._udp_rx_thread, args=(key,), daemon=True)
             _udp_rx_thread_x.start()
 
@@ -180,6 +176,7 @@ class XBee2UDP(object):
         _start_time = time.time()
         _loop_sleep = 0.0001
         _loop_hz = int(1/_loop_sleep)
+
         while self.running:
             # Service explicit messages
             for device in self.network.get_devices():
@@ -187,26 +184,28 @@ class XBee2UDP(object):
 
                 # Service new packets from the XBee
                 rx_packet = self.xbee.read_data_from(device)
-                while rx_packet:
-                    _before = time.time()
-                    incoming = bytes(rx_packet.data)
-                    print_msg(key, _start_time, incoming)
-                    self.queue_in[key] += incoming
-                    _bytes_in += len(incoming)
-                    rx_packet = self.xbee.read_data_from(device)
+                if rx_packet:
+                    try:
+                        mav_msgs = self.parsers[key].parse_buffer(rx_packet.data)
+                    except mavlink.MAVError as e:
+                        print(e)
+                    else:
+                        if mav_msgs:
+                            self.queue_in[key].extend(mav_msgs)
+                            _bytes_in += len(rx_packet.data)
 
                 # Service new data from UDP connections
-                outgoing, self.queue_out[key] = self.queue_out[key], b''
-                while outgoing:
+                outgoing = b''
+                while self.queue_out[key] or outgoing:
+                    if self.queue_out[key]:
+                        outgoing += bytes(self.queue_out[key].read().get_msgbuf())
                     self.xbee.send_data(device, outgoing[:XBEE_PKT_MAX])
-                    _bytes_out += len(outgoing[:XBEE_PKT_MAX])
                     outgoing = outgoing[XBEE_PKT_MAX:]
-                    print_msg(key, _start_time, outgoing)
 
-            # Wait between loops
+            # # Wait between loops
             if not _loops % _loop_hz:
-                print(f'IN: {8*_bytes_in/(time.time() - _start_time):.2f}bps, '
-                      f'OUT: {8*_bytes_out/(time.time() - _start_time):.2f}bps')
+                print(f'\rIN: {8*_bytes_in/(time.time() - _start_time):10>.2f}bps, '
+                      f'OUT: {8*_bytes_out/(time.time() - _start_time):10>.2f}bps', end='', flush=True)
             _loops += 1
             time.sleep(0.0001)
 
@@ -223,20 +222,16 @@ class XBee2UDP(object):
         print(f'Started UDP Rx Thread for {REMOTE_DEVICE_IDS[key]}')
         # Thread Main Loop
         while self.running:
-            try:
-                data, _ = self.sockets[key].recvfrom(KiB)
-                self.queue_out[key] += data
-            except ConnectionRefusedError as e:
-                print(f'{e}: Please reconnect {self.connections[key]} in GCS')
-            except socket.timeout as e:
-                print(f'{e}: Check XBee-PX4 script on {REMOTE_DEVICE_IDS[key]}')
+            msg = self.mav_socks[key].recv_msg()
+            if msg:
+                self.queue_out[key].write(msg)
             time.sleep(0.001)
 
         # Wait until the UDP Tx thread has terminated before closing UDP socket
         while not self._udp_tx_closed:
-            time.sleep(0.01)
+            continue
 
-        self.sockets[key].close()
+        self.mav_socks[key].close()
 
     def _udp_tx_thread(self):
         """
@@ -248,12 +243,9 @@ class XBee2UDP(object):
 
         while self.running:
             for key in self.queue_in:
-                try:
-                    if self.queue_in[key]:
-                        bytes_sent = self.sockets[key].send(self.queue_in[key])
-                        self.queue_in[key] = self.queue_in[key][bytes_sent:]
-                except ConnectionRefusedError as e:
-                    print(f'{e}: Please reconnect {self.connections[key]} in GCS')
+                if self.queue_in[key]:
+                    msg = self.queue_in[key].read()
+                    self.mav_socks[key].write(msg.get_msgbuf())
             time.sleep(0.01)
 
         self._udp_tx_closed = True
