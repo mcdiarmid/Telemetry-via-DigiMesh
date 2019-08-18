@@ -51,6 +51,17 @@ elif platform.system() == 'Windows':
     device_finder = _device_finder_windows
 
 
+def write_buffer_log(logname, buffer):
+    with open(logname, 'w') as f:
+        line = ''
+        for i, b in enumerate(buffer):
+            line += f'{b:02X}'
+
+            if not (i+1) % 25:
+                _ = f.write(line + '\n')
+                line = ''
+
+
 def print_msg(name, start, data, is_incoming=True):
     # Formats incoming and outgoing messages to fit the terminal window
     cols, rows = os.get_terminal_size()
