@@ -2,6 +2,23 @@ import os
 import platform
 import time
 import serial.tools.list_ports as list_ports
+from pymavlink.mavutil import x25crc
+
+MAVLINK_SEQ_BYTE = 4
+MAVLINK_MESSAGE_CRCS = (
+    50, 124, 137, 0, 237, 217, 104, 119, 0, 0, 0, 89, 0, 0, 0, 0, 0, 0, 0, 0,
+    214, 159, 220, 168, 24, 23, 170, 144, 67, 115, 39, 246, 185, 104, 237, 244,
+    242, 212, 9, 254, 230, 28, 28, 132, 221, 232, 11, 153, 41, 39, 214, 223,
+    141, 33, 15, 3, 100, 24, 239, 238, 30, 240, 183, 130, 130, 0, 148, 21, 0,
+    243, 124, 0, 0, 0, 20, 0, 152, 143, 0, 0, 127, 106, 0, 0, 0, 0, 0, 0, 0,
+    231, 183, 63, 54, 0, 0, 0, 0, 0, 0, 0, 175, 102, 158, 208, 56, 93, 0, 0, 0,
+    0, 235, 93, 124, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 42, 241, 15, 134, 219, 208,
+    188, 84, 22, 19, 21, 134, 0, 78, 68, 189, 127, 111, 21, 21, 144, 1, 234,
+    73, 181, 22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 204, 49, 170, 44, 83, 46, 0)
 
 
 class Fifo(list):
@@ -91,3 +108,32 @@ def print_msg(name, start, data, is_incoming=True):
         txt += brkline
 
     print(txt)
+
+
+def replace_seq(msg, seq):
+    """
+    from https://mavlink.io/en/about/overview.html
+
+    uint8_t magic;              ///< protocol magic marker
+    uint8_t len;                ///< Length of payload
+    uint8_t incompat_flags;     ///< flags that must be understood
+    uint8_t compat_flags;       ///< flags that can be ignored if not understood
+    uint8_t seq;                ///< Sequence of packet
+    uint8_t sysid;              ///< ID of message sender system/aircraft
+    uint8_t compid;             ///< ID of the message sender component
+    uint8_t msgid 0:7;          ///< first 8 bits of the ID of the message
+    uint8_t msgid 8:15;         ///< middle 8 bits of the ID of the message
+    uint8_t msgid 16:23;        ///< last 8 bits of the ID of the message
+    uint8_t payload[max 255];   ///< A maximum of 255 payload bytes
+    uint16_t checksum;          ///< X.25 CRC
+
+    :param msg: MAVLink message from PX4
+    :param seq: New sequence value
+    :return: bytes object for the message buffer
+    """
+    data = msg.get_msgbuf()
+    data[MAVLINK_SEQ_BYTE] = seq % 255
+    cc = x25crc(bytes(data)[1:-2])
+    cc.accumulate(MAVLINK_MESSAGE_CRCS[msg.get_msgId()])
+    data[-2], data[-1] = cc.crc & 0xFF, cc.crc >> 8
+    return bytes(data)
