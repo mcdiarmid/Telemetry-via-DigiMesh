@@ -4,6 +4,24 @@ import time
 import serial.tools.list_ports as list_ports
 
 
+class Fifo(list):
+    def write(self, data):
+        self.__iadd__(data)
+        return len(data)
+
+    def read(self):
+        return self.pop(0)
+
+
+class MAVQueue(list):
+    def write(self, mav_msg):
+        super().append(mav_msg)
+        return 1
+
+    def read(self):
+        return super().pop(0)
+
+
 def _device_finder_linux(name):
     while True:
         for comport in list_ports.comports():

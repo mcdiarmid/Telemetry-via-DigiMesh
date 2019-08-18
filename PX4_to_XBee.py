@@ -15,7 +15,7 @@ import time
 import threading
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
-from commonlib import device_finder
+from commonlib import device_finder, MAVQueue
 
 
 ########################################################################################################################
@@ -34,12 +34,13 @@ GCS_64BIT_ADDR = '0013a20040d68c2e'
 PX4_MAV_PERIODS = {
 	# Hard-coded Tx rates for specific MAVLink messages
 	'ATTITUDE':            		0.125,
+	'VFR_HUD':             		0.625,
+	'ODOMETRY':					0.825,
 	'COMMAND_LONG':	       		1,
 	'ATTITUDE_QUATERNION': 		1,
 	'ACTUATOR_CONTROL_TARGET': 	1,
 	'TIMESYNC':	       			1,
 	'SYSTEM_TIME':         		1,
-	'VFR_HUD':             		0.625,
 	'HEARTBEAT':           		1,
 	'ATTITUDE_TARGET':     		1.25,
 	'HIGHRES_IMU':         		1.67,
@@ -53,7 +54,7 @@ PX4_MAV_PERIODS = {
 	'VIBRATION':           		5,
 	'PING':                		10,
 }
-MAV_IGNORES = ['BAD_DATA', 'ODOMETRY']  # TODO: temporary, haven't investigated whether these should be "ignored"
+MAV_IGNORES = ['BAD_DATA']
 MAV_SEQ_BYTE = 2
 
 ########################################################################################################################
@@ -61,37 +62,6 @@ MAV_SEQ_BYTE = 2
 #                                                  FUNCTIONS/CLASSES
 #
 ########################################################################################################################
-
-
-class Fifo(object):
-	"""
-	Basic Python implementation of a First In First Out (FIFO) buffer
-	Note: Copied directly from https://github.com/ArduPilot/pymavlink.git from examples/mavtest.py line 13.
-	"""
-	def __init__(self):
-		self.buf = []
-
-	def write(self, data):
-		self.buf += data
-		return len(data)
-
-	def read(self):
-		return self.buf.pop(0)
-
-
-class MAVQueue(object):
-	def __init__(self):
-		self.buf = []
-
-	def write(self, mav_msg):
-		self.buf.append(mav_msg)
-		return 1
-
-	def read(self):
-		return self.buf.pop(0)
-
-	def has_mav(self):
-		return len(self.buf) > 0
 
 
 def obtain_network(xbee: XBeeDevice):
@@ -129,13 +99,12 @@ def mav_rx_thread(mav_device: mavutil.mavserial, priority_queue: MAVQueue, sleep
 
 	:param mav_device: MAVLink serial connection object
 	:param priority_queue: Queue for messages that come through as a result of a GCS request
-	:param sleep_time: Sleep time between loops TODO: this should probably be a function of PX4_COMPANION_BAUD
+	:param sleep_time: Sleep time between loops
 	"""
 	print(f'Started MAVLink Rx Thread')
 	while True:  # Loop forever
 		m = mav_device.recv_msg()
 		if m:
-			# TODO will likely need another array of MAV types to exempt from this queue
 			if m.get_type() not in PX4_MAV_PERIODS and m.get_type() not in MAV_IGNORES:
 				priority_queue.write(m)
 		time.sleep(sleep_time)
@@ -161,7 +130,6 @@ if __name__ == '__main__':
 	
 	# Priority Queue for servicing GCS requests
 	priority_queue = MAVQueue()
-	data = b''
 
 	# Separate thread for constantly receiving and parsing new MAVLink packets from the flight controller
 	_parse_thread = threading.Thread(target=mav_rx_thread, args=(px4, priority_queue,), daemon=True)
@@ -170,16 +138,19 @@ if __name__ == '__main__':
 	# Infinite loop for bridging serial connection between PixHawk and XBee
 	print(f'Started main message handling loop')
 	while True:
-		# Check priority queue
-		while priority_queue.has_mav():
+		# Reset Tx buffer
+		tx_buffer = b''
+
+		# Add any prioritized messages to front of Tx buffer
+		while priority_queue:
 			msg = priority_queue.read()
 			print(f'Priority message of type: {msg.get_type()}')
 			msg_byte_array = msg.get_msgbuf()			
 			msg_byte_array[MAV_SEQ_BYTE] = seq_counter % 255
-			data += bytes(msg_byte_array)
 			seq_counter += 1
+			tx_buffer += bytes(msg_byte_array)
 
-		# Check whether messages are scheduled for transmission
+		# Add any prioritized messages to the end of the Tx buffer
 		for mav_type in PX4_MAV_PERIODS:
 			if time.time() >= next_times[mav_type]:
 				next_times[mav_type] = time.time() + PX4_MAV_PERIODS[mav_type]
@@ -190,12 +161,12 @@ if __name__ == '__main__':
 
 				msg_byte_array = px4.messages[mav_type].get_msgbuf()
 				msg_byte_array[MAV_SEQ_BYTE] = seq_counter % 255
-				data += bytes(msg_byte_array)
+				tx_buffer += bytes(msg_byte_array)
 				seq_counter += 1
 
 		# Break data up into packets of maximum length XBEE_PKT_MAX
-		while data:
-			pkt_data, data = data[:XBEE_PKT_MAX], data[XBEE_PKT_MAX:]
+		while tx_buffer:
+			pkt_data, tx_buffer = tx_buffer[:XBEE_PKT_MAX], tx_buffer[XBEE_PKT_MAX:]
 			pkt_sent = xb.send_data(gcs, pkt_data)
 
 		# Read XBee, Write to PX4
@@ -206,7 +177,8 @@ if __name__ == '__main__':
 				gcs_msg = px4.mav.decode(data)
 				msg_type = gcs_msg.get_type()
 				print(f'GCS message of type: {msg_type}')
-			except mavlink.MAVError:
+			except mavlink.MAVError as e:
+				print(e)
 				continue
 
 			if msg_type == 'HEARTBEAT':
@@ -233,5 +205,4 @@ if __name__ == '__main__':
 			
 			px4.write(data)
 
-		# TODO Make this a function of something, e.g. related to blocking time of ~3.7ms for a 255 byte Tx + ACK
 		time.sleep(0.001)
