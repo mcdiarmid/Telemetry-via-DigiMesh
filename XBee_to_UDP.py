@@ -14,7 +14,7 @@ Author: Campbell McDiarmid
 import time
 import threading
 from digi.xbee.devices import XBeeDevice
-from commonlib import print_msg, device_finder, MAVQueue, Fifo
+from commonlib import device_finder, MAVQueue, Fifo
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
 from pymavlink import mavutil
 
@@ -45,6 +45,7 @@ KiB = 1024
 SER_BUF_LIMIT = 0xFFF
 REMOTE_DEVICE_IDS = {
     '0013a20040e2ab74': 'Worker #1',
+    '0013a20040d68c32': 'Relay #1',
     '0013a20041520335': 'Navi #3',
 }
 
@@ -123,11 +124,11 @@ class XBee2UDP(object):
                                default=(LOCALHOST, UDP_IP))
                 port += 1
                 self.connections[key] = (ip, port)
-                print(f'Assigned device link to UDP {(ip, port)}')
 
             else:
                 ip, port = self.connections[key]
 
+            print(f'Assigned device link to UDP {(ip, port)}')
             self.mav_socks[key] = mavutil.mavudp(device=f'{ip}:{port}', input=False)
             self.queue_in[key] = MAVQueue()
             self.queue_out[key] = MAVQueue()
@@ -174,8 +175,8 @@ class XBee2UDP(object):
         _bytes_out = 0
         _loops = 0
         _start_time = time.time()
-        _loop_sleep = 0.0001
-        _loop_hz = int(1/_loop_sleep)
+        _prev_print = time.time()
+        _print_period = 0.5
 
         while self.running:
             # Service explicit messages
@@ -200,11 +201,13 @@ class XBee2UDP(object):
                     if self.queue_out[key]:
                         outgoing += bytes(self.queue_out[key].read().get_msgbuf())
                     self.xbee.send_data(device, outgoing[:XBEE_PKT_MAX])
+                    _bytes_out += len(outgoing[:XBEE_PKT_MAX])
                     outgoing = outgoing[XBEE_PKT_MAX:]
 
-            # # Wait between loops
-            if not _loops % _loop_hz:
-                print(f'\rIN: {8*_bytes_in/(time.time() - _start_time):>10.2f}bps, '
+            # Wait between loops
+            if time.time() - _prev_print >= _print_period:
+                _prev_print = time.time()
+                print(f'\rIN: {8*_bytes_in/(time.time() - _start_time):>10.2f}bps '
                       f'OUT: {8*_bytes_out/(time.time() - _start_time):>10.2f}bps', end='', flush=True)
             _loops += 1
             time.sleep(0.0001)
@@ -225,7 +228,7 @@ class XBee2UDP(object):
             msg = self.mav_socks[key].recv_msg()
             if msg:
                 self.queue_out[key].write(msg)
-            time.sleep(0.001)
+            time.sleep(0.01)
 
         # Wait until the UDP Tx thread has terminated before closing UDP socket
         while not self._udp_tx_closed:
@@ -254,6 +257,7 @@ class XBee2UDP(object):
 def main():
     # TODO: Add command line argument passing
     uav_xbee_lut = {
+        '0013a20040e2ab74': (LOCALHOST, 14554),
         '0013a20040d68c32': (LOCALHOST, 14555),
         '0013a20041520335': (LOCALHOST, 14556),
     }
