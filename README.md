@@ -33,7 +33,7 @@ $ sudo pip3 install digi-xbee pyserial pymavlink
 Device rules installation (requires root):
 
 ```bash
-# cp device-rules/*.rules /etc/udev/rules.d/
+# cp devices/rules/*.rules /etc/udev/rules.d/
 # udevadm control --reload && udevadm trigger
 ```
 
