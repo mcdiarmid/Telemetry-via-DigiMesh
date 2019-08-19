@@ -58,7 +58,7 @@ REMOTE_DEVICE_IDS = {
 
 
 class XBee2UDP(object):
-    def __init__(self, connections, serial_port='/dev/ttyUSB0', baud_rate=XBEE_MAX_BAUD, udp_timeout=3, **kwargs):
+    def __init__(self, connections, serial_port='/dev/ttyUSB0', baud_rate=XBEE_MAX_BAUD, **kwargs):
         """
         Version 2 of the XBee to UDP class
 
@@ -76,6 +76,7 @@ class XBee2UDP(object):
         else:
             raise TypeError('Expected an iterable of tuples (key, ip, port), or dict of tuples key: (ip, port)')
 
+        # Initialize LUT for queues, MAVLink UDP sockets and stream parsers
         self.queue_in = {}
         self.queue_out = {}
         self.mav_socks = {}
@@ -87,7 +88,6 @@ class XBee2UDP(object):
         self.running = False
         self._udp_tx_closed = True
         self.network = None
-        self.udp_timeout = udp_timeout
 
     def start(self):
         """
@@ -128,7 +128,7 @@ class XBee2UDP(object):
             else:
                 ip, port = self.connections[key]
 
-            print(f'Assigned device link to UDP {(ip, port)}')
+            print(f'Assigned {REMOTE_DEVICE_IDS[key]} link to UDP {(ip, port)}')
             self.mav_socks[key] = mavutil.mavudp(device=f'{ip}:{port}', input=False)
             self.queue_in[key] = MAVQueue()
             self.queue_out[key] = MAVQueue()
@@ -222,7 +222,6 @@ class XBee2UDP(object):
 
         :param key: Unique 64bit address associated with a remote XBee device, string representation
         """
-        print(f'Started UDP Rx Thread for {REMOTE_DEVICE_IDS[key]}')
         # Thread Main Loop
         while self.running:
             msg = self.mav_socks[key].recv_msg()
