@@ -15,27 +15,26 @@ https://github.com/pyserial/pyserial/blob/master/LICENSE.txt
 Python3 - Arch based Linux Operating Systems (Python 3.7 is installed by default on fresh Arch based install):
 
 ```bash
-pacman -S python python-pip
+$ sudo pacman -S python python-pip
 ```
 
 Debian based Linux Operating Systems:
 
 ```bash
-apt-get install python3 python3-pip
+$ sudo apt-get install python3 python3-pip
 ```
 
 Python3 libraries:
 
 ```bash
-pip3 install digi-xbee pyserial pymavlink
+$ sudo pip3 install digi-xbee pyserial pymavlink
 ```
 
 Device rules installation (requires root):
 
 ```bash
-cp device-rules/66-xbee.rules /etc/udev/rules.d/66-xbee.rules
-cp device-rules/67-pixhawk.rules /etc/udev/rules.d/67-pixhawk.rules
-udevadm control --reload && udevadm trigger
+# cp device-rules/*.rules /etc/udev/rules.d/
+# udevadm control --reload && udevadm trigger
 ```
 
 [QGroundControl](https://github.com/mavlink/qgroundcontrol) has been the GCS software of choice 
