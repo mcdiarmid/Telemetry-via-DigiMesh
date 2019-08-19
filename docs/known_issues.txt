@@ -1,0 +1,15 @@
+1. Some MAVLink messages, namely ODOMETRY, sometimes do not get read from the pixhawk.
+2. Sometimes the XBee failes to find other devices on the network (might be a hardware issue).
+3. If the computer running the GCS script goes to sleep, the XBee_to_UDP.py script crashes.
+4. Companion computer script has not been profiled or performance tested, and has only been running on a relatively
+powerful companion computer (Intel NUC).
+5. MAVLink message errors pop up at the GCS end when the a multiple UAVs are sending telemetry data to the GCS XBee.
+This is likely a bottlenecking issue resulting in a buffer overflow at some point.  Unfortunately the XBee has quite a
+small Rx buffer (these scripts should be fairly easy to adapt for other radios that suport mesh/ad-hoc networking.
+6. Companion computer implementation controls the average Tx rate of each MAVLink message well, however when message
+queues pile up with prioritized and/or scheduled messages then large data bursts are sent.  This likely results in one 
+XBee consuming the majority of the network bandwidth for a short period of time.  E.g. when a GCS-vehicle connection 
+is established a large spike in data-rate occurs due to the vehicle doing a once-off sending every readable flight 
+controller setting.  Probably what is causing the previous issue.
+7. RADIO_STATUS messages are currently filled with fake values to ensure the link is established.  Most of these values
+should be obtainable via the XBee hardware for a more realistic message.
