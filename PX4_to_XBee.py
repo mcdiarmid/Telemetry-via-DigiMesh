@@ -36,10 +36,13 @@ PX4_MAV_PERIODS = {
     # Hard-coded Tx rates for specific MAVLink messages
     'ATTITUDE':            		0.125,
     'VFR_HUD':             		0.625,
-    'ODOMETRY':					0.825,
+    'ODOMETRY':				0.825,
+    'GPS_RAW_INT':                      0.25,
+    'GLOBAL_POSITION_INT':              0.5,
+    'POSITION_TARGET_GLOBAL_INT':       5,
     'COMMAND_LONG':	       		1,
     'ATTITUDE_QUATERNION': 		1,
-    'ACTUATOR_CONTROL_TARGET': 	1,
+    'ACTUATOR_CONTROL_TARGET': 	        1,
     'TIMESYNC':	       			1,
     'SYSTEM_TIME':         		1,
     'HEARTBEAT':           		1,
@@ -53,6 +56,7 @@ PX4_MAV_PERIODS = {
     'LOCAL_POSITION_NED':  		2.5,
     'ESTIMATOR_STATUS':    		5,
     'VIBRATION':           		5,
+    'HOME_POSITION':                    5,
     'PING':                		10,
 }
 MAV_IGNORES = ['BAD_DATA']
