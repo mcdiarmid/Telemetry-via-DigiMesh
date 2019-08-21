@@ -11,11 +11,12 @@ Author: Campbell McDiarmid
 
 
 from digi.xbee.devices import XBeeDevice
+from digi.xbee.exception import XBeeException
 import time
 import threading
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
-from commonlib import device_finder, MAVQueue, Fifo, replace_seq
+from commonlib import device_finder, MAVQueue, Fifo, replace_seq, reconnect_blocker, send_buffer_limit_rate
 
 
 ########################################################################################################################
@@ -55,7 +56,7 @@ PX4_MAV_PERIODS = {
     'PING':                		10,
 }
 MAV_IGNORES = ['BAD_DATA']
-MAV_SEQ_BYTE = 4
+
 
 ########################################################################################################################
 #
@@ -72,6 +73,9 @@ def obtain_network(xbee: XBeeDevice):
     """
     # Discover network.  Repeat until GCS has been found.
     network = xbee.get_network()
+    def callback(remote):
+        print(remote)
+    network.add_device_discovered_callback(callback)
 
     while True:
         print('Discovering network, GCS not found yet.')
@@ -80,7 +84,8 @@ def obtain_network(xbee: XBeeDevice):
         # Block until discovery is finished
         while network.is_discovery_running():
             time.sleep(0.1)
-
+	
+        print(network.get_devices())
         # Check devices on the network by Node ID
         for device in network.get_devices():
             address = device.get_64bit_addr().address.hex()
@@ -114,7 +119,7 @@ if __name__ == '__main__':
     # TODO: Add command line argument passing + big tidy
     # Find PX4 Device and open a serial connection
     px4_port = device_finder('FT232R USB UART')  # TODO Will need to make a rules file to identify PX4 via FTDI @ TELEM2
-    px4 = mavutil.mavserial(px4_port, PX4_COMPANION_BAUD)
+    px4 = mavutil.mavserial(px4_port, PX4_COMPANION_BAUD, source_system=19, source_component=1)
 
     # Find XBee Device and open a serial connection
     xbee_port = device_finder('XBee')
@@ -130,7 +135,6 @@ if __name__ == '__main__':
 
     # Priority Queue for servicing GCS requests
     priority_queue = MAVQueue()
-    parser = mavlink.MAVLink(Fifo())
 
     # Separate thread for constantly receiving and parsing new MAVLink packets from the flight controller
     _parse_thread = threading.Thread(target=mav_rx_thread, args=(px4, priority_queue,), daemon=True)
@@ -164,21 +168,26 @@ if __name__ == '__main__':
                 seq_counter += 1
 
         # Break data up into packets of maximum length XBEE_PKT_MAX
-        while tx_buffer:
-            pkt_data, tx_buffer = tx_buffer[:XBEE_PKT_MAX], tx_buffer[XBEE_PKT_MAX:]
-            pkt_sent = xb.send_data(gcs, pkt_data)
-            try:
-                parser.parse_buffer(pkt_data)
-            except mavlink.MAVError as e:
-                print(e)
+        try:
+            send_buffer_limit_rate(xb, gcs, tx_buffer, 28800)
+        except XBeeException:
+            reconnect_blocker(xb, gcs, 'GCS')
+            priority_queue = MAVQueue()  # Reset priority queue once reconnected
+            continue
+
         # Read XBee, Write to PX4
-        message = xb.read_data_from(gcs)
+        try:
+            message = xb.read_data_from(gcs)
+        except XBeeException:
+            reconnect_blocker(xb, gcs, 'GCS')
+            priority_queue = MAVQueue()  # Reset priority queue once reconnected
+            continue
+
         if message:
             data = message.data
             try:
                 gcs_msg = px4.mav.decode(data)
                 msg_type = gcs_msg.get_type()
-                print(f'GCS message of type: {msg_type}')
             except mavlink.MAVError as e:
                 print(e)
                 continue
