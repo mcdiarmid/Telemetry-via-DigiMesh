@@ -4,6 +4,7 @@ import time
 import serial.tools.list_ports as list_ports
 import struct
 from pymavlink.generator.mavcrc import x25crc
+from digi.xbee.devices import XBeeDevice, RemoteXBeeDevice
 
 
 MAVLINK_SEQ_BYTE = 4
@@ -65,6 +66,24 @@ def write_buffer_log(logname, buffer):
             if not (i+1) % 25:
                 _ = f.write(line + '\n')
                 line = ''
+
+
+def send_buffer_limit_rate(local_xbee: XBeeDevice, remote_xbee: RemoteXBeeDevice, buffer: bytes, max_bps: int):
+    """
+    Loop through and send a buffer of bytes in a more controlled method than previously intended.
+
+    :param local_xbee: Transmitter XBee object
+    :param remote_xbee: Remote Receiver XBee object
+    :param buffer: Buffer containing bytes to be sent
+    :param max_bps: Maximum transmission rate in bits per second to avoid large clumps of fast data
+    """
+    while buffer:
+        pre = time.time()
+        local_xbee.send_data(remote_xbee, buffer[:255])
+        n_sent = len(buffer[:255]) * 8
+        buffer = buffer[255:]
+        while time.time() - pre < n_sent/max_bps:
+            continue
 
 
 def replace_seq(msg, seq):
