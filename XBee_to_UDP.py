@@ -125,8 +125,8 @@ class XBee2UDP(object):
         _udp_tx_thread.start()
 
         # Once discovery has successfully completed, begin main loops
-        _xbee_tx_thread = threading.Thread(target=self._xbee_tx_thread, daemon=True)
-        _xbee_tx_thread.start()
+        _xbee_thread = threading.Thread(target=self._xbee_thread, daemon=True)
+        _xbee_thread.start()
 
     def close(self):
         """
@@ -177,13 +177,11 @@ class XBee2UDP(object):
         print(f'Deleting device {REMOTE_DEVICE_IDS[addr64]}')
         self.dev_running[addr64] = False
         time.sleep(0.02)
-        del self.remote_xbees[addr64]
-        del self.queue_in[addr64]
-        del self.queue_out[addr64]
-        del self.mav_socks[addr64]
-        del self.parsers[addr64]
 
-    def _xbee_tx_thread(self):
+        for lut in (self.remote_xbees, self.queue_in, self.queue_out, self.mav_socks, self.parsers, self.dev_running):
+            del lut[addr64]
+
+    def _xbee_thread(self):
         """
         Primary loop for servicing and passing data to the correct place.
         Each loop iterates through all known devices in the network. Inside each loop:
@@ -236,10 +234,11 @@ class XBee2UDP(object):
                 while self.queue_out[addr64]:
                     outgoing += bytes(self.queue_out[addr64].read().get_msgbuf())
 
+                _bytes_out += len(outgoing)
                 try:
                     send_buffer_limit_rate(self.xbee, device, outgoing, 230400)
                 except XBeeException:
-                    print(f'Connection lost with {REMOTE_DEVICE_IDS[addr64]}')
+                    print(f'\nConnection lost with {REMOTE_DEVICE_IDS[addr64]}')
                     self.del_remote_device(addr64)
 
             # Wait between loops
