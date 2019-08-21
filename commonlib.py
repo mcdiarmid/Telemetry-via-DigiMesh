@@ -86,6 +86,19 @@ def send_buffer_limit_rate(local_xbee: XBeeDevice, remote_xbee: RemoteXBeeDevice
             continue
 
 
+def reconnect_blocker(local: XBeeDevice, remote: XBeeDevice, name: str):
+    print(f'Link lost with {name}')
+    reconnected = False
+    while not reconnected:
+        try:
+            _ = local.read_data_from(remote)
+        except XBeeException:
+            time.sleep(1)
+        else:
+            reconnected = True  # Exception not raised, device reconnected!
+    print(f'Link regained with {name}')
+
+
 def replace_seq(msg, seq):
     """
     from https://mavlink.io/en/about/overview.html
