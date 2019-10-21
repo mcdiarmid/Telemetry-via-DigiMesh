@@ -162,6 +162,23 @@ def replace_seq(msg, seq):
     return bytes(data)
 
 
+def queue_scheduled(seq_counter, next_times, px4, mavrate_lut=PX4_MAV_PERIODS):
+    buffer = b''
+    for mav_type in mavrate_lut:
+        if time.time() >= next_times[mav_type]:
+            next_times[mav_type] = time.time() + mavrate_lut[mav_type]
+
+            if mav_type not in px4.messages:
+                print(f'MAVLink message of type {mav_type} has not yet been received!')
+                continue
+            msg = px4.messages[mav_type]
+            msg_bytes = replace_seq(msg, seq_counter)
+            buffer += msg_bytes
+            seq_counter += 1
+
+    return buffer, seq_counter
+
+
 def mav_rx_thread(mav_device: mavutil.mavserial, priority_queue: MAVQueue, sleep_time=0.0005):
     """
     This function serves the purpose of receiving messages from the flight controller at such a rate that no buffer
