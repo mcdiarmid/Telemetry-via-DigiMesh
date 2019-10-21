@@ -158,7 +158,6 @@ class XBee2UDP(object):
         Function for creating all of the necessary queues, parsers and connections associated with a new remote device
         :param device: New remote xbee device object
         """
-        self.dev_running[addr] = True
 
         # Check whether detected device was specified during initialization
         if relay:
@@ -190,6 +189,7 @@ class XBee2UDP(object):
 
         print(f'Assigned {REMOTE_DEVICE_IDS[addr]} link to UDP {(ip, port)}')
 
+        self.dev_running[addr] = True
         self.mav_socks[addr] = mavutil.mavudp(device=f'{ip}:{port}', input=False)
         _udp_rx_thread_x = threading.Thread(target=self._udp_rx_thread, args=(addr,), daemon=True)
         _udp_rx_thread_x.start()

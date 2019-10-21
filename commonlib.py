@@ -4,6 +4,7 @@ import time
 import serial.tools.list_ports as list_ports
 import struct
 from pymavlink.generator.mavcrc import x25crc
+from pymavlink import mavutil
 from digi.xbee.devices import XBeeDevice, RemoteXBeeDevice
 
 
