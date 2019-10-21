@@ -8,6 +8,33 @@ from digi.xbee.devices import XBeeDevice, RemoteXBeeDevice
 
 
 MAVLINK_SEQ_BYTE = 4
+PX4_MAV_PERIODS = {
+    'ATTITUDE':            		        0.125,
+    'VFR_HUD':             		        0.625,
+    'ODOMETRY':				            0.825,
+    'GPS_RAW_INT':                      0.25,
+    'GLOBAL_POSITION_INT':              0.5,
+    'POSITION_TARGET_GLOBAL_INT':       5,
+    'COMMAND_LONG':	       		        1,
+    'ATTITUDE_QUATERNION': 		        1,
+    'ACTUATOR_CONTROL_TARGET': 	        1,
+    'TIMESYNC':	       			        1,
+    'SYSTEM_TIME':         		        1,
+    'HEARTBEAT':           		        1,
+    'ATTITUDE_TARGET':     		        1.25,
+    'HIGHRES_IMU':         		        1.67,
+    'SYS_STATUS':          		        2.5,
+    'BATTERY_STATUS':      		        2.5,
+    'SERVO_OUTPUT_RAW':    		        2.5,
+    'EXTENDED_SYS_STATE':  		        2.5,
+    'ALTITUDE':            		        2.5,
+    'LOCAL_POSITION_NED':  		        2.5,
+    'ESTIMATOR_STATUS':    		        5,
+    'VIBRATION':           		        5,
+    'HOME_POSITION':                    5,
+    'PING':                		        10,
+}
+MAV_IGNORES = ['BAD_DATA']
 
 
 class Fifo(list):
@@ -21,11 +48,17 @@ class Fifo(list):
 
 class MAVQueue(list):
     def write(self, mav_msg):
-        super().append(mav_msg)
+        self.append(mav_msg)
         return 1
 
     def read(self):
-        return super().pop(0)
+        return self.pop(0)
+
+    def read_bytes(self):
+        ret = b''
+        while self:
+            ret += bytes(self.read().get_msgbuf())
+        return ret
 
 
 def _device_finder_linux(name):
@@ -127,3 +160,24 @@ def replace_seq(msg, seq):
         cc.accumulate(struct.pack('B', msg.crc_extra))
     data[-2], data[-1] = cc.crc & 0xFF, cc.crc >> 8
     return bytes(data)
+
+
+def mav_rx_thread(mav_device: mavutil.mavserial, priority_queue: MAVQueue, sleep_time=0.0005):
+    """
+    This function serves the purpose of receiving messages from the flight controller at such a rate that no buffer
+    overflow occurs.  When mav_device.recv_msg() is called, if enough data has come in from the serial connection to
+    form a MAVLink packet, the packet is parsed and the latest copy of the particular type of MAVLink message is updated
+    in the mav_device.messages dict.  This dict is used in the main thread for scheduling the transmission of each type
+    of MAVLink packet, effectively decimating the stream to a set rate for each type of MAVLink message.
+
+    :param mav_device: MAVLink serial connection object
+    :param priority_queue: Queue for messages that come through as a result of a GCS request
+    :param sleep_time: Sleep time between loops
+    """
+    print(f'Started MAVLink Rx Thread')
+    while True:  # Loop forever
+        m = mav_device.recv_msg()
+        if m:
+            if m.get_type() not in PX4_MAV_PERIODS and m.get_type() not in MAV_IGNORES:
+                priority_queue.write(m)
+        time.sleep(sleep_time)

@@ -16,7 +16,8 @@ import time
 import threading
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
-from commonlib import device_finder, MAVQueue, Fifo, replace_seq, reconnect_blocker, send_buffer_limit_rate
+from commonlib import device_finder, MAVQueue, Fifo, replace_seq, \
+    reconnect_blocker, send_buffer_limit_rate, mav_rx_thread, PX4_MAV_PERIODS
 
 
 ########################################################################################################################
@@ -25,40 +26,12 @@ from commonlib import device_finder, MAVQueue, Fifo, replace_seq, reconnect_bloc
 #
 ########################################################################################################################
 
-
 XBEE_PKT_MAX = 0xFF
 SERIAL_BUFFER_MAX = 0xFFF
 ARBITRARY_MIN = 100
 XBEE_MAX_BAUD = 230400
 PX4_COMPANION_BAUD = 921600
 GCS_64BIT_ADDR = '0013a20040d68c2e'
-PX4_MAV_PERIODS = {
-    # Hard-coded Tx rates for specific MAVLink messages
-    'ATTITUDE':            		0.125,
-    'VFR_HUD':             		0.625,
-    'ODOMETRY':				0.825,
-    'GPS_RAW_INT':                      0.25,
-    'GLOBAL_POSITION_INT':              0.5,
-    'POSITION_TARGET_GLOBAL_INT':       5,
-    'COMMAND_LONG':	       		1,
-    'ATTITUDE_QUATERNION': 		1,
-    'ACTUATOR_CONTROL_TARGET': 	        1,
-    'TIMESYNC':	       			1,
-    'SYSTEM_TIME':         		1,
-    'HEARTBEAT':           		1,
-    'ATTITUDE_TARGET':     		1.25,
-    'HIGHRES_IMU':         		1.67,
-    'SYS_STATUS':          		2.5,
-    'BATTERY_STATUS':      		2.5,
-    'SERVO_OUTPUT_RAW':    		2.5,
-    'EXTENDED_SYS_STATE':  		2.5,
-    'ALTITUDE':            		2.5,
-    'LOCAL_POSITION_NED':  		2.5,
-    'ESTIMATOR_STATUS':    		5,
-    'VIBRATION':           		5,
-    'HOME_POSITION':                    5,
-    'PING':                		10,
-}
 MAV_IGNORES = ['BAD_DATA']
 
 
@@ -88,7 +61,7 @@ def obtain_network(xbee: XBeeDevice):
         # Block until discovery is finished
         while network.is_discovery_running():
             time.sleep(0.1)
-	
+
         print(network.get_devices())
         # Check devices on the network by Node ID
         for device in network.get_devices():
@@ -98,28 +71,7 @@ def obtain_network(xbee: XBeeDevice):
                 return device, network
 
 
-def mav_rx_thread(mav_device: mavutil.mavserial, priority_queue: MAVQueue, sleep_time=0.0005):
-    """
-    This function serves the purpose of receiving messages from the flight controller at such a rate that no buffer
-    overflow occurs.  When mav_device.recv_msg() is called, if enough data has come in from the serial connection to
-    form a MAVLink packet, the packet is parsed and the latest copy of the particular type of MAVLink message is updated
-    in the mav_device.messages dict.  This dict is used in the main thread for scheduling the transmission of each type
-    of MAVLink packet, effectively decimating the stream to a set rate for each type of MAVLink message.
-
-    :param mav_device: MAVLink serial connection object
-    :param priority_queue: Queue for messages that come through as a result of a GCS request
-    :param sleep_time: Sleep time between loops
-    """
-    print(f'Started MAVLink Rx Thread')
-    while True:  # Loop forever
-        m = mav_device.recv_msg()
-        if m:
-            if m.get_type() not in PX4_MAV_PERIODS and m.get_type() not in MAV_IGNORES:
-                priority_queue.write(m)
-        time.sleep(sleep_time)
-
-
-if __name__ == '__main__':
+def main(relay=False):
     # TODO: Add command line argument passing + big tidy
     # Find PX4 Device and open a serial connection
     px4_port = device_finder('FT232R USB UART')  # TODO Will need to make a rules file to identify PX4 via FTDI @ TELEM2
@@ -199,8 +151,8 @@ if __name__ == '__main__':
             if msg_type == 'HEARTBEAT':
                 """
                 HEARTBEAT reply/"acknowledgement"
-                Need to manually construct a RADIO_STATUS MAVLink message and place it at the front of 
-                priority_queue, as RADIO_STATUS messages are automatically constructed and sent back to the 
+                Need to manually construct a RADIO_STATUS MAVLink message and place it at the front of
+                priority_queue, as RADIO_STATUS messages are automatically constructed and sent back to the
                 GCS on SiK radio firmware in response to a HEARTBEAT.  This is crucial for establishing a
                 recognisable link on GCS software, such as QGroundControl.
                 """
@@ -221,3 +173,7 @@ if __name__ == '__main__':
             px4.write(data)
 
         time.sleep(0.001)
+
+
+if __name__ == '__main__':
+    main()
