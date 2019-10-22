@@ -16,7 +16,7 @@ import threading
 from digi.xbee.devices import XBeeDevice, RemoteXBeeDevice
 from digi.xbee.exception import InvalidPacketException, TimeoutException, InvalidOperatingModeException, XBeeException
 from commonlib import device_finder, MAVQueue, Fifo, send_buffer_limit_rate, \
-    mav_rx_thread, queue_scheduled
+    mav_rx_thread, queue_scheduled, PX4_MAV_PERIODS, replace_seq
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
 from pymavlink import mavutil
 
@@ -30,7 +30,7 @@ from pymavlink import mavutil
 
 # Localhost IP and arbitrarily defined based port
 LOCALHOST = '127.0.0.1'
-WIFI = '192.168.1.62'
+WIFI = '192.168.1.186'
 UDP_PORT = 14555
 UDP_IP = LOCALHOST
 
@@ -46,12 +46,13 @@ XBEE_MAX_BAUD = 230400
 PX4_DEFAULT_BAUD = 115200
 KiB = 1024
 SER_BUF_LIMIT = 0xFFF
+RELAY_PX4 = 'LOCAL'
 REMOTE_DEVICE_IDS = {
     '0013A20040E2AB74': 'Worker #1',
     '0013A20040D68C32': 'Relay #1',
     '0013A20041520335': 'Navi #3',
+    RELAY_PX4:'RELAY',
 }
-RELAY_PX4 = 'LOCAL'
 
 ########################################################################################################################
 #
@@ -104,7 +105,7 @@ class XBee2UDP(object):
 
         if relay:
             px4_port = device_finder('FT232R USB UART')
-            px4 = mavutil.mavserial(px4_port, PX4_COMPANION_BAUD, source_system=19, source_component=1)
+            px4 = mavutil.mavserial(px4_port, PX4_DEFAULT_BAUD*8, source_system=20, source_component=1)
             self.relay = px4
             self.new_remote_device(px4, relay=True)
             self.next = {k: time.time() + PX4_MAV_PERIODS[k] for k in PX4_MAV_PERIODS}
@@ -171,7 +172,7 @@ class XBee2UDP(object):
 
         else:
             addr = device.get_64bit_addr().address.hex().upper()
-            ip = LOCALHOST
+            ip = WIFI if self.relay else LOCALHOST 
             self.queue_in[addr] = MAVQueue()
             self.queue_out[addr] = MAVQueue()
             self.parsers[addr] = mavlink.MAVLink(Fifo())
@@ -268,12 +269,12 @@ class XBee2UDP(object):
             if self.relay:
                 priority_buffer = b''
 
-                while priority_queue:
+                while self.queue_in[RELAY_PX4]:
                     msg = self.queue_in[RELAY_PX4].read()
                     msg_bytes = replace_seq(msg, seq_counter)
                     priority_buffer += msg_bytes
                     seq_counter += 1
-                    print(f'Priority message of type: {msg.get_type()}')
+                    #print(f'Priority message of type: {msg.get_type()}')
 
                 queue_buffer, seq_counter  = queue_scheduled(seq_counter, self.next, self.relay)
                 # mav_msgs = self.parsers[RELAY_PX4].parse_buffer(priority_buffer + queue_buffer)
@@ -324,12 +325,12 @@ class XBee2UDP(object):
 def main(relay=False):
     # TODO: Add command line argument passing
     uav_xbee_lut = {
-        '0013A20040E2AB74': (LOCALHOST, 14554),
-        '0013A20040D68C32': (LOCALHOST, 14555),
-        '0013A20041520335': (LOCALHOST, 14556),
+        '0013A20040E2AB74': (WIFI, 14554),
+        '0013A20040D68C32': (WIFI, 14555),
+        '0013A20041520335': (WIFI, 14556),
     }
     xb_port = device_finder('XBee')
-    xb = XBee2UDP(uav_xbee_lut, serial_port=xb_port, baud_rate=XBEE_MAX_BAUD)
+    xb = XBee2UDP(uav_xbee_lut, serial_port=xb_port, relay=relay, baud_rate=XBEE_MAX_BAUD)
     xb.start()
 
     try:
@@ -341,4 +342,4 @@ def main(relay=False):
 
 
 if __name__ == '__main__':
-    main()
+    main(relay=True)

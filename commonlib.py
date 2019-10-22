@@ -170,7 +170,7 @@ def queue_scheduled(seq_counter, next_times, px4, mavrate_lut=PX4_MAV_PERIODS):
             next_times[mav_type] = time.time() + mavrate_lut[mav_type]
 
             if mav_type not in px4.messages:
-                print(f'MAVLink message of type {mav_type} has not yet been received!')
+                #print(f'MAVLink message of type {mav_type} has not yet been received!')
                 continue
             msg = px4.messages[mav_type]
             msg_bytes = replace_seq(msg, seq_counter)
