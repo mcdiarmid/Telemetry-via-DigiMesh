@@ -1,4 +1,3 @@
-import os
 import platform
 import time
 import serial.tools.list_ports as list_ports
@@ -6,6 +5,7 @@ import struct
 from pymavlink.generator.mavcrc import x25crc
 from pymavlink import mavutil
 from digi.xbee.devices import XBeeDevice, RemoteXBeeDevice
+from digi.xbee.exception import XBeeException
 
 
 MAVLINK_SEQ_BYTE = 4
@@ -163,14 +163,14 @@ def replace_seq(msg, seq):
     return bytes(data)
 
 
-def queue_scheduled(seq_counter, next_times, px4, mavrate_lut=PX4_MAV_PERIODS):
+def queue_scheduled(seq_counter, next_times, px4, mavrate_lut):
     buffer = b''
     for mav_type in mavrate_lut:
         if time.time() >= next_times[mav_type]:
             next_times[mav_type] = time.time() + mavrate_lut[mav_type]
 
             if mav_type not in px4.messages:
-                #print(f'MAVLink message of type {mav_type} has not yet been received!')
+                print(f'MAVLink message of type {mav_type} has not yet been received!')
                 continue
             msg = px4.messages[mav_type]
             msg_bytes = replace_seq(msg, seq_counter)

@@ -9,15 +9,15 @@ Author: Campbell McDiarmid
 #
 ########################################################################################################################
 
-
-from digi.xbee.devices import XBeeDevice
-from digi.xbee.exception import XBeeException
 import time
 import threading
+import argparse
+from digi.xbee.devices import XBeeDevice
+from digi.xbee.exception import XBeeException
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
-from commonlib import device_finder, MAVQueue, Fifo, replace_seq, \
-    reconnect_blocker, send_buffer_limit_rate, mav_rx_thread, PX4_MAV_PERIODS
+from commonlib import device_finder, MAVQueue, replace_seq, reconnect_blocker, send_buffer_limit_rate, mav_rx_thread, \
+    PX4_MAV_PERIODS, queue_scheduled
 
 
 ########################################################################################################################
@@ -48,9 +48,7 @@ def obtain_network(xbee: XBeeDevice):
     """
     # Discover network.  Repeat until GCS has been found.
     network = xbee.get_network()
-    def callback(remote):
-        print(remote)
-    network.add_device_discovered_callback(callback)
+    network.add_device_discovered_callback(print)
 
     while True:
         print('Discovering network, GCS not found yet.')
@@ -69,10 +67,10 @@ def obtain_network(xbee: XBeeDevice):
                 return device, network
 
 
-def main(relay=False):
-    # TODO: Add command line argument passing + big tidy
+def main():
+
     # Find PX4 Device and open a serial connection
-    px4_port = device_finder('FT232R USB UART')  # TODO Will need to make a rules file to identify PX4 via FTDI @ TELEM2
+    px4_port = device_finder('FT232R USB UART')
     px4 = mavutil.mavserial(px4_port, PX4_COMPANION_BAUD, source_system=19, source_component=1)
 
     # Find XBee Device and open a serial connection
@@ -121,20 +119,12 @@ def main(relay=False):
                 tx_buffer += msg_bytes
                 seq_counter += 1
 
-        # Break data up into packets of maximum length XBEE_PKT_MAX
         try:
-            send_buffer_limit_rate(xb, gcs, tx_buffer, 28800)
+            send_buffer_limit_rate(xb, gcs, tx_buffer, 28800)  # Send all buffered data at a limited rate
+            message = xb.read_data_from(gcs)  # Read XBee, Write to PX4
         except XBeeException:
-            reconnect_blocker(xb, gcs, 'GCS')
-            priority_queue = MAVQueue()  # Reset priority queue once reconnected
-            continue
-
-        # Read XBee, Write to PX4
-        try:
-            message = xb.read_data_from(gcs)
-        except XBeeException:
-            reconnect_blocker(xb, gcs, 'GCS')
-            priority_queue = MAVQueue()  # Reset priority queue once reconnected
+            reconnect_blocker(xb, gcs, 'GCS')  # Block script until GCS has been reconnected
+            priority_queue.clear()  # Clear priority queue once reconnected
             continue
 
         if message:
