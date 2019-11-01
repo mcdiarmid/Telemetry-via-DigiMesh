@@ -12,12 +12,12 @@ Author: Campbell McDiarmid
 import time
 import threading
 import argparse
+import json
 from digi.xbee.devices import XBeeDevice
 from digi.xbee.exception import XBeeException
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
-from commonlib import device_finder, MAVQueue, replace_seq, reconnect_blocker, send_buffer_limit_rate, mav_rx_thread, \
-    PX4_MAV_PERIODS, queue_scheduled
+from commonlib import device_finder, MAVQueue, replace_seq, reconnect_blocker, send_buffer_limit_rate, mav_rx_thread
 
 
 ########################################################################################################################
@@ -28,7 +28,6 @@ from commonlib import device_finder, MAVQueue, replace_seq, reconnect_blocker, s
 
 XBEE_PKT_MAX = 0xFF
 SERIAL_BUFFER_MAX = 0xFFF
-ARBITRARY_MIN = 100
 XBEE_MAX_BAUD = 230400
 PX4_COMPANION_BAUD = 921600
 GCS_64BIT_ADDR = '0013a20040d68c2e'
@@ -58,7 +57,6 @@ def obtain_network(xbee: XBeeDevice):
         while network.is_discovery_running():
             time.sleep(0.1)
 
-        print(network.get_devices())
         # Check devices on the network by Node ID
         for device in network.get_devices():
             address = device.get_64bit_addr().address.hex()
@@ -67,11 +65,10 @@ def obtain_network(xbee: XBeeDevice):
                 return device, network
 
 
-def main():
-
+def main(settings, udp=None):
     # Find PX4 Device and open a serial connection
     px4_port = device_finder('FT232R USB UART')
-    px4 = mavutil.mavserial(px4_port, PX4_COMPANION_BAUD, source_system=19, source_component=1)
+    px4 = mavutil.mavserial(px4_port, PX4_COMPANION_BAUD, source_component=1)
 
     # Find XBee Device and open a serial connection
     xbee_port = device_finder('XBee')
@@ -82,7 +79,8 @@ def main():
     gcs, network = obtain_network(xb)
 
     # Generate a dictionary for keeping track of when each message is scheduled to be sent next
-    next_times = {k: time.time() + PX4_MAV_PERIODS[k] for k in PX4_MAV_PERIODS}
+    mav_rates = settings['mav_rates']
+    next_times = {k: time.time() + mav_rates[k] for k in mav_rates}
     seq_counter = 0
 
     # Priority Queue for servicing GCS requests
@@ -107,9 +105,9 @@ def main():
             print(f'Priority message of type: {msg.get_type()}')
 
         # Add any prioritized messages to the end of the Tx buffer
-        for mav_type in PX4_MAV_PERIODS:
+        for mav_type in mav_rates:
             if time.time() >= next_times[mav_type]:
-                next_times[mav_type] = time.time() + PX4_MAV_PERIODS[mav_type]
+                next_times[mav_type] = time.time() + mav_rates[mav_type]
 
                 if mav_type not in px4.messages:
                     print(f'MAVLink message of type {mav_type} has not yet been received!')
@@ -164,4 +162,30 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # Argument passing for PX4 adapter script
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        'settings', type=str,
+        help='Path to UAV settings json file.')
+    parser.add_argument(
+        '--ssh', nargs=4, type=str, required=False, default=None,
+        help='SSH_CONNECTION environment variable when using SSH from GCS computer over WiFi (relay only).')
+    parser.add_argument(
+        '--ip', type=str, required=False, default=None,
+        help='IP address of GCS computer over WiFi (relay only).')
+    args = parser.parse_args()
+
+    # JSON File
+    _json_file = open(args.settings, 'r')
+    _uav_settings = json.load(_json_file)
+    port = _uav_settings['port']
+
+    # UDP link directly between GCS and UAV (WiFi only)
+    if args.ip:
+        _udp = f'{args.ip}:{port}'
+    elif args.ssh:
+        _udp = f'{args.ssh[0]}:{port}'
+    else:
+        _udp = None
+
+    main(_uav_settings, udp=_udp)

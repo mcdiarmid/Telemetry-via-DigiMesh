@@ -8,33 +8,8 @@ from digi.xbee.devices import XBeeDevice, RemoteXBeeDevice
 from digi.xbee.exception import XBeeException
 
 
+XBEE_MAX_BAUD = 230400
 MAVLINK_SEQ_BYTE = 4
-PX4_MAV_PERIODS = {
-    'ATTITUDE':            		        0.125,
-    'VFR_HUD':             		        0.625,
-    'ODOMETRY':				            0.825,
-    'GPS_RAW_INT':                      0.25,
-    'GLOBAL_POSITION_INT':              0.5,
-    'POSITION_TARGET_GLOBAL_INT':       5,
-    'COMMAND_LONG':	       		        1,
-    'ATTITUDE_QUATERNION': 		        1,
-    'ACTUATOR_CONTROL_TARGET': 	        1,
-    'TIMESYNC':	       			        1,
-    'SYSTEM_TIME':         		        1,
-    'HEARTBEAT':           		        1,
-    'ATTITUDE_TARGET':     		        1.25,
-    'HIGHRES_IMU':         		        1.67,
-    'SYS_STATUS':          		        2.5,
-    'BATTERY_STATUS':      		        2.5,
-    'SERVO_OUTPUT_RAW':    		        2.5,
-    'EXTENDED_SYS_STATE':  		        2.5,
-    'ALTITUDE':            		        2.5,
-    'LOCAL_POSITION_NED':  		        2.5,
-    'ESTIMATOR_STATUS':    		        5,
-    'VIBRATION':           		        5,
-    'HOME_POSITION':                    5,
-    'PING':                		        10,
-}
 MAV_IGNORES = ['BAD_DATA']
 
 
@@ -89,17 +64,6 @@ if platform.system() == 'Linux':
     device_finder = _device_finder_linux
 elif platform.system() == 'Windows':
     device_finder = _device_finder_windows
-
-
-def write_buffer_log(logname, buffer):
-    with open(logname, 'w') as f:
-        line = ''
-        for i, b in enumerate(buffer):
-            line += f'{b:02X}'
-
-            if not (i+1) % 25:
-                _ = f.write(line + '\n')
-                line = ''
 
 
 def send_buffer_limit_rate(local_xbee: XBeeDevice, remote_xbee: RemoteXBeeDevice, buffer: bytes, max_bps: int):
@@ -180,7 +144,7 @@ def queue_scheduled(seq_counter, next_times, px4, mavrate_lut):
     return buffer, seq_counter
 
 
-def mav_rx_thread(mav_device: mavutil.mavserial, priority_queue: MAVQueue, sleep_time=0.0005):
+def mav_rx_thread(mav_device: mavutil.mavserial, priority_queue: MAVQueue, mav_rates: dict, sleep_time=0.0005):
     """
     This function serves the purpose of receiving messages from the flight controller at such a rate that no buffer
     overflow occurs.  When mav_device.recv_msg() is called, if enough data has come in from the serial connection to
@@ -190,12 +154,13 @@ def mav_rx_thread(mav_device: mavutil.mavserial, priority_queue: MAVQueue, sleep
 
     :param mav_device: MAVLink serial connection object
     :param priority_queue: Queue for messages that come through as a result of a GCS request
+    :param mav_rates: Dictionary of scheduled MAVLink message types and corresponding transmission rates
     :param sleep_time: Sleep time between loops
     """
     print(f'Started MAVLink Rx Thread')
     while True:  # Loop forever
         m = mav_device.recv_msg()
         if m:
-            if m.get_type() not in PX4_MAV_PERIODS and m.get_type() not in MAV_IGNORES:
+            if m.get_type() not in mav_rates and m.get_type() not in MAV_IGNORES:
                 priority_queue.write(m)
         time.sleep(sleep_time)

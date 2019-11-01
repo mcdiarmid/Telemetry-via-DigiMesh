@@ -1,4 +1,4 @@
 #!/usr/bin/bash
 
 sleep 10
-python3.7 %PATH_TO_DIRECTOR%/Telemetry-via-DigiMesh/PX4_to_XBee.py
+python3.7 %PATH_TO_DIRECTOR%/Telemetry-via-DigiMesh/px4_adapter.py

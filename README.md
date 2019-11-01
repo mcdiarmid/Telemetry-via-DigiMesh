@@ -38,17 +38,15 @@ Device rules installation (requires root):
 ```
 
 [QGroundControl](https://github.com/mavlink/qgroundcontrol) has been the GCS software of choice 
-throughout 
-development, but other versatile GCS software such as [Mission 
-Planner](https://github.com/ArduPilot/MissionPlanner) should be able to interface with these 
-scripts easily.
+throughout development, but other versatile GCS software such as [Mission Planner](https://github.com/ArduPilot/MissionPlanner)
+should be able to interface with these scripts easily.
 
 ## Usage
 The purpose of these scripts are to enable the use of XBee DigiMesh without the need to 
 modify the Pixhawk PX4 firmware, or compiling a custom build for GCS software.  
 
-* ```PX4_to_XBee.py``` has been designed to operate on a companion computer that is connected to 
+* ```px4_adapter.py``` has been designed to operate on a companion computer that is connected to
 both a Pixhawk and an XBee via USB.
-* ```XBee_to_UDP.py``` acts as an interface between an XBee device and GCS software.  For each 
+* ```gcs_adapter.py``` acts as an interface between an XBee device and GCS software.  For each
 XBee device connected to the mesh network, a UDP socket is created and connected to a user 
 defined port (UDP server hosted by GCS software).
