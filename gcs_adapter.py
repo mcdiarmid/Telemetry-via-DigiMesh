@@ -11,6 +11,7 @@ Author: Campbell McDiarmid
 ########################################################################################################################
 
 
+import os
 import time
 import argparse
 import threading
@@ -141,11 +142,11 @@ class XBee2UDP(object):
         data = request_message.data
         identifier, port = struct.unpack('>BH', data)
         name = f'Navi {identifier}'
-        device = request_message.remote
+        device = request_message.remote_device
 
         # Create new vehicle object and acknowledge vehicle over radio
         vehicle = UAVObject(name, self.ip, port, device)
-        self.vehicles[device] = vehicle
+        self.vehicles.append(vehicle)
         self.xbee.send_data(device, b'COORD')
 
         # Start Rx UDP thread for this vehicle
@@ -169,9 +170,10 @@ class XBee2UDP(object):
             # will replace with a walrus statement in python 3.8 (rx_packet := self.xbee.read_data())
             while rx_packet:
                 # Check whether transmitting device is known or not
-                if rx_packet.remote_device in self.vehicles:
+                if any([v == rx_packet.remote_device for v in self.vehicles]):
                     index = self.vehicles.index(rx_packet.remote_device)
                     vehicle = self.vehicles[index]
+                    
                     try:
                         mav_msgs = vehicle.parser.parse_buffer(rx_packet.data)
                     except mavlink.MAVError as e:  # Check MAVLink message for errors
@@ -230,7 +232,7 @@ class XBee2UDP(object):
             for vehicle in self.vehicles:
                 if vehicle.queue_in:
                     msg = vehicle.queue_in.read()
-                    vehicle.socket.write(msg.get_msgubf())
+                    vehicle.socket.write(msg.get_msgbuf())
             time.sleep(0.01)
 
 
@@ -257,9 +259,8 @@ def main(ip, baud_rate):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        'ip', type=str, help='IP address of GCS for UDP connections.')
-    parser.add_argument(
         '--baud', type=str, required=False, default=XBEE_MAX_BAUD,
         help='Baud rate (bits per second) for serial communications with XBee radio.')
     args = parser.parse_args()
-    main(args.ip, args.baud)
+    ip = os.environ['SSH_CONNECTION'].split(' ')[0]
+    main(ip, args.baud)
