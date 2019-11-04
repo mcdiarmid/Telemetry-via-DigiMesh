@@ -263,5 +263,5 @@ if __name__ == '__main__':
         '--baud', type=str, required=False, default=XBEE_MAX_BAUD,
         help='Baud rate (bits per second) for serial communications with XBee radio.')
     args = parser.parse_args()
-    _ip = os.environ['SSH_CONNECTION'].split(' ')[0]
+    _ip, *_ = os.environ['SSH_CONNECTION'].split(' ')
     main(_ip, args.baud)

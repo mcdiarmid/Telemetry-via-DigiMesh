@@ -389,7 +389,7 @@ if __name__ == '__main__':
 
     # UDP link directly between GCS and UAV (WiFi only)
     if args.ssh:
-        _ip = os.environ["SSH_CONNECTION"].split(" ")[0]
+        _ip, *_ = os.environ["SSH_CONNECTION"].split(" ")
         _udp = f'{_ip}:{_port}'
     else:
         _udp = None
