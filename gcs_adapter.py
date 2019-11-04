@@ -15,7 +15,7 @@ import time
 import argparse
 import threading
 import struct
-from digi.xbee.devices import XBeeDevice
+from digi.xbee.devices import XBeeDevice, RemoteXBeeDevice
 from digi.xbee.exception import InvalidPacketException, TimeoutException, InvalidOperatingModeException, XBeeException
 from commonlib import device_finder, MAVQueue, Fifo, send_buffer_limit_rate, XBEE_MAX_BAUD
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
@@ -33,7 +33,7 @@ class UAVObject:
     """
     Class containing all of the useful queues, attributes, links, etc. that is associated with a UAV.
     """
-    def __init__(self, name, ip, port, remote_device, addr):
+    def __init__(self, name, ip, port, remote_device):
         """
         Initializer
 
@@ -41,7 +41,6 @@ class UAVObject:
         :param ip: IP address for MAVLink UDP connection with GCS
         :param port: Port unique to this vehicle for MAVLink UDP connection with GCS
         :param remote_device: RemoteXBeeDevice object associated with this UAVs XBee radio
-        :param addr: String representation (hex) of a 64 bit address associated with the XBee radio
         """
         self.name = name
         self.ip = ip
@@ -51,12 +50,19 @@ class UAVObject:
         self.socket = mavutil.mavudp(device=f'{ip}:{port}', input=False)
         self.parser = mavlink.MAVLink(Fifo())
         self.device = remote_device
-        self.addr = addr
         self.connected = True
         print(f'Assigned {name} link to UDP {(ip, port)}')
 
     def __repr__(self):
         return f'"{self.name}"@{self.ip}:{self.port}'
+
+    def __eq__(self, other):
+        if isinstance(other, XBeeDevice) or isinstance(other, RemoteXBeeDevice):
+            return self.device == other
+        elif isinstance(other, UAVObject):
+            return self == other
+        else:
+            raise TypeError(f'UAVObject only supports comparison to XBee objects or another UAVObject')
 
 
 class XBee2UDP(object):
@@ -132,16 +138,15 @@ class XBee2UDP(object):
         :param request_message: XBee packet containing information about the new UAV requesting a connection
         """
         # Extract information
-        addr = request_message.to_dict()['Sender: ']
         data = request_message.data
         identifier, port = struct.unpack('>BH', data)
         name = f'Navi {identifier}'
         device = request_message.remote
 
         # Create new vehicle object and acknowledge vehicle over radio
-        vehicle = UAVObject(name, self.ip, port, device, addr)
-        self.vehicles.append(vehicle)
-        self.xbee.send_data(vehicle.device, b'OK')
+        vehicle = UAVObject(name, self.ip, port, device)
+        self.vehicles[device] = vehicle
+        self.xbee.send_data(device, b'COORD')
 
         # Start Rx UDP thread for this vehicle
         _udp_rx_thread_x = threading.Thread(target=self._udp_rx_thread, args=(vehicle,), daemon=True)
@@ -161,26 +166,25 @@ class XBee2UDP(object):
         while self.main_running:
             # I. Service messages from vehicles (incoming/Rx)
             rx_packet = self.xbee.read_data()
+            # will replace with a walrus statement in python 3.8 (rx_packet := self.xbee.read_data())
             while rx_packet:
-                addr = rx_packet.to_dict()['Sender: ']
-                exists = False
-                for vehicle in self.vehicles:
-                    if addr != vehicle.addr:
-                        continue
-                    exists = True
-                    # Check MAVLink message for errors
+                # Check whether transmitting device is known or not
+                if rx_packet.remote_device in self.vehicles:
+                    index = self.vehicles.index(rx_packet.remote_device)
+                    vehicle = self.vehicles[index]
                     try:
                         mav_msgs = vehicle.parser.parse_buffer(rx_packet.data)
-                    except mavlink.MAVError as e:
+                    except mavlink.MAVError as e:  # Check MAVLink message for errors
                         print(e)
                     else:
                         if mav_msgs:
                             vehicle.queue_in.extend(mav_msgs)
                             # _bytes_in += len(rx_packet.data)
-
-                # If exists is true then a new UAV has been found
-                if not exists:
-                    self.new_uav(rx_packet)
+                else:
+                    self.new_uav(rx_packet)  # Unknown transmitter - reply to connection request
+                    time.sleep(0.01)
+                    self.xbee.flush_queues()  # Xbee queue may contain multiple connection requests from this device
+                    time.sleep(0.01)
 
                 rx_packet = self.xbee.read_data()
 

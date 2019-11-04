@@ -3,14 +3,12 @@ import time
 import serial.tools.list_ports as list_ports
 import struct
 from pymavlink.generator.mavcrc import x25crc
-from pymavlink import mavutil
 from digi.xbee.devices import XBeeDevice, RemoteXBeeDevice
 from digi.xbee.exception import XBeeException
 
 
 XBEE_MAX_BAUD = 230400
 MAVLINK_SEQ_BYTE = 4
-MAV_IGNORES = ['BAD_DATA']
 
 
 class Fifo(list):
@@ -23,8 +21,11 @@ class Fifo(list):
 
 
 class MAVQueue(list):
-    def write(self, mav_msg):
-        self.append(mav_msg)
+    def write(self, mav_msg, priority=False):
+        if priority:
+            self.insert(0, mav_msg)
+        else:
+            self.append(mav_msg)
         return 1
 
     def read(self):
@@ -52,7 +53,7 @@ def _device_finder_linux(name):
 def _device_finder_windows(name):
     while True:
         for comport in list_ports.comports():
-            if comport.device == 'COM3':  # TODO Ugly code but temporary
+            if comport.device == 'COM3':  # TODO
                 print(f'{name} found')
                 return comport.device
         print(f'List of Comports: {list_ports.comports()}')
@@ -84,8 +85,14 @@ def send_buffer_limit_rate(local_xbee: XBeeDevice, remote_xbee: RemoteXBeeDevice
             continue
 
 
-def reconnect_blocker(local: XBeeDevice, remote: XBeeDevice, name: str):
-    print(f'Link lost with {name}')
+def reconnect_blocker(local: XBeeDevice, remote: RemoteXBeeDevice):
+    """
+    Blocking function that awaits a message from a recently disconnected device.
+
+    :param local: Local XBee radio (connected to computer via USB)
+    :param remote: Remote XBee radio that a connection has been lost with
+    """
+    print(f'Link lost with coordinator')
     reconnected = False
     while not reconnected:
         try:
@@ -93,8 +100,8 @@ def reconnect_blocker(local: XBeeDevice, remote: XBeeDevice, name: str):
         except XBeeException:
             time.sleep(1)
         else:
-            reconnected = True  # Exception not raised, device reconnected!
-    print(f'Link regained with {name}')
+            reconnected = True
+    print(f'Link lost with coordinator')
 
 
 def replace_seq(msg, seq):
@@ -142,25 +149,3 @@ def queue_scheduled(seq_counter, next_times, px4, mavrate_lut):
             seq_counter += 1
 
     return buffer, seq_counter
-
-
-def mav_rx_thread(mav_device: mavutil.mavserial, priority_queue: MAVQueue, mav_rates: dict, sleep_time=0.0005):
-    """
-    This function serves the purpose of receiving messages from the flight controller at such a rate that no buffer
-    overflow occurs.  When mav_device.recv_msg() is called, if enough data has come in from the serial connection to
-    form a MAVLink packet, the packet is parsed and the latest copy of the particular type of MAVLink message is updated
-    in the mav_device.messages dict.  This dict is used in the main thread for scheduling the transmission of each type
-    of MAVLink packet, effectively decimating the stream to a set rate for each type of MAVLink message.
-
-    :param mav_device: MAVLink serial connection object
-    :param priority_queue: Queue for messages that come through as a result of a GCS request
-    :param mav_rates: Dictionary of scheduled MAVLink message types and corresponding transmission rates
-    :param sleep_time: Sleep time between loops
-    """
-    print(f'Started MAVLink Rx Thread')
-    while True:  # Loop forever
-        m = mav_device.recv_msg()
-        if m:
-            if m.get_type() not in mav_rates and m.get_type() not in MAV_IGNORES:
-                priority_queue.write(m)
-        time.sleep(sleep_time)
