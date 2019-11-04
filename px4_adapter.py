@@ -17,6 +17,7 @@ import json
 import struct
 from digi.xbee.devices import XBeeDevice, RemoteXBeeDevice
 from digi.xbee.exception import XBeeException
+from digi.xbee.util.utils import bytes_to_int
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
 from commonlib import device_finder, MAVQueue, replace_seq, reconnect_blocker, send_buffer_limit_rate
@@ -265,9 +266,9 @@ class PX4Adapter:
         :param xbee:
         :param coordinator:
         """
-        rssi = xbee.get_parameter('DB')
-        remrssi = coordinator.get_parameter('DB')
-        errors = xbee.get_parameter('ER')
+        rssi = bytes_to_int(xbee.get_parameter('DB'))
+        remrssi = bytes_to_int(coordinator.get_parameter('DB'))
+        errors = bytes_to_int(xbee.get_parameter('ER'))
         radio_status_msg = self.px4.mav.radio_status_encode(
             rssi=rssi, remrssi=remrssi, rxerrors=errors, txbuf=100, noise=0, remnoise=0, fixed=0)
         radio_status_msg.pack(self.px4.mav)
