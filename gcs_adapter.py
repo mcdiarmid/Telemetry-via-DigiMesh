@@ -18,7 +18,7 @@ import threading
 import struct
 from digi.xbee.devices import XBeeDevice, RemoteXBeeDevice
 from digi.xbee.exception import InvalidPacketException, TimeoutException, InvalidOperatingModeException, XBeeException
-from commonlib import device_finder, MAVQueue, Fifo, send_buffer_limit_rate, XBEE_MAX_BAUD
+from commonlib import device_finder, MAVQueue, Fifo, XBEE_MAX_BAUD, XBEE_PKT_SIZE
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
 from pymavlink import mavutil
 
@@ -181,27 +181,28 @@ class XBee2UDP(object):
                     else:
                         if mav_msgs:
                             vehicle.queue_in.extend(mav_msgs)
-                            # _bytes_in += len(rx_packet.data)
                 else:
                     self.new_uav(rx_packet)  # Unknown transmitter - reply to connection request
                     time.sleep(0.01)
-                    self.xbee.flush_queues()  # Xbee queue may contain multiple connection requests from this device
+                    self.xbee.flush_queues()  # XBee queue may contain multiple connection requests from this device
                     time.sleep(0.01)
 
                 rx_packet = self.xbee.read_data()
 
             # II. Service queues from GCS (outgoing/Tx)
-            vehicle_num = 0
-            while vehicle_num < len(self.vehicles):
-                vehicle = self.vehicles[vehicle_num]
+            for vehicle in self.vehicles:
                 outgoing = vehicle.queue_out.read_bytes()
+                loop_time = XBEE_PKT_SIZE * 8 / XBEE_MAX_BAUD
                 try:
-                    send_buffer_limit_rate(self.xbee, vehicle.device, outgoing, 230400)  # TODO Don't like this any more
+                    while outgoing:
+                        prev = time.time()
+                        self.xbee.send_data(vehicle.device, outgoing[:XBEE_PKT_SIZE])
+                        outgoing = outgoing[XBEE_PKT_SIZE:]
+                        wait = loop_time + prev - time.time()
+                        time.sleep(wait if wait > 0 else 0)
                 except XBeeException:
                     self.del_uav(vehicle)
-                else:
-                    # _bytes_out += len(outgoing)
-                    vehicle_num += 1
+                    break
 
             time.sleep(0.001)
 
@@ -262,5 +263,5 @@ if __name__ == '__main__':
         '--baud', type=str, required=False, default=XBEE_MAX_BAUD,
         help='Baud rate (bits per second) for serial communications with XBee radio.')
     args = parser.parse_args()
-    ip = os.environ['SSH_CONNECTION'].split(' ')[0]
-    main(ip, args.baud)
+    _ip = os.environ['SSH_CONNECTION'].split(' ')[0]
+    main(_ip, args.baud)

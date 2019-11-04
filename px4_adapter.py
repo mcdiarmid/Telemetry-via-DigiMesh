@@ -1,5 +1,5 @@
 """
-PX4 to XBee serial adapter script
+PX4 to XBee or UDP software adapter script
 Author: Campbell McDiarmid
 """
 
@@ -20,24 +20,13 @@ from digi.xbee.exception import XBeeException
 from digi.xbee.util.utils import bytes_to_int
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
-from commonlib import device_finder, MAVQueue, replace_seq, reconnect_blocker, send_buffer_limit_rate
+from commonlib import device_finder, MAVQueue, replace_seq, reconnect_blocker, XBEE_PKT_SIZE, XBEE_MAX_BAUD, \
+    PX4_COMPANION_BAUD, MAV_IGNORES
 
 
 ########################################################################################################################
 #
-#                                                    CONSTANTS
-#
-########################################################################################################################
-
-
-XBEE_MAX_BAUD = 230400
-PX4_COMPANION_BAUD = 921600
-MAV_IGNORES = ['BAD_DATA']
-
-
-########################################################################################################################
-#
-#                                                  FUNCTIONS/CLASSES
+#                                                      CLASSES
 #
 ########################################################################################################################
 
@@ -62,7 +51,7 @@ class PX4Adapter:
         # Initialized lists, queues, look-up-tables and counters
         self.known_endpoints = []
         self.old_coordinators = []
-        self.queue_out = MAVQueue()  # TODO May need to separate queue_out into priority and scheduled queues
+        self.queue_out = MAVQueue()
         self.settings = settings
         self.rates = settings['mav_rates']
         self.next_times = {k: time.time() + self.rates[k] for k in self.rates}
@@ -142,6 +131,7 @@ class PX4Adapter:
         xbee = XBeeDevice(xbee_port, XBEE_MAX_BAUD)
         xbee.open()
         coordinator = self.find_coordinator(xbee)
+        max_average_bps = 28800
 
         print(f'Started main message handling loop')
         while self.running:
@@ -152,8 +142,15 @@ class PX4Adapter:
                 tx_buffer += msg_bytes
 
             # II. Transmit buffered bytes, catch exceptions raised if connection has been lost
+            loop_time = XBEE_PKT_SIZE * 8 / max_average_bps
             try:
-                send_buffer_limit_rate(xbee, coordinator, tx_buffer, 28800)  # Send all buffered data at a limited rate
+                while tx_buffer:
+                    prev = time.time()
+                    xbee.send_data(coordinator, tx_buffer[:XBEE_PKT_SIZE])
+                    tx_buffer = tx_buffer[XBEE_PKT_SIZE:]
+                    wait = loop_time + prev - time.time()
+                    time.sleep(wait if wait > 0 else 0)
+
                 message = xbee.read_data()  # Read XBee for Coordinator messages
             except XBeeException:
                 reconnect_blocker(xbee, coordinator)  # Block script until coordinator has been reconnected
@@ -284,13 +281,14 @@ class PX4Adapter:
         # Discover network.  Repeat until GCS has been found.
         network = xbee.get_network()
         network.add_device_discovered_callback(print)
+        network.set_discovery_timeout(5)
 
         print('Beginning Coordinator Discovery loop.')
         while True:
             print('Discovering network, Coordinator not found yet.')
             network.start_discovery_process()
 
-            # Block until discovery is finished
+            # Block until discovery is finished TODO is blocking required?
             while network.is_discovery_running():
                 time.sleep(0.1)
 
@@ -347,6 +345,13 @@ class PX4Adapter:
         print('CHANGING COORDINATOR')
         self.queue_out.clear()
         self.stop()
+
+
+########################################################################################################################
+#
+#                                                      CLASSES
+#
+########################################################################################################################
 
 
 def main(settings, udp_str=None):
