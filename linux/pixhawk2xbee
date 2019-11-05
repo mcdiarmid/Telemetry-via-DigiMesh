@@ -1,4 +1,0 @@
-#!/usr/bin/bash
-
-sleep 10
-python3.7 %PATH_TO_DIRECTOR%/Telemetry-via-DigiMesh/px4_adapter.py

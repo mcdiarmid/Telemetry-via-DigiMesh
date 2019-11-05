@@ -262,6 +262,13 @@ if __name__ == '__main__':
     parser.add_argument(
         '--baud', type=str, required=False, default=XBEE_MAX_BAUD,
         help='Baud rate (bits per second) for serial communications with XBee radio.')
+    parser.add_argument(
+        '--ip', type=str, required=False,
+        help='IP address for UDP links back to GCS software')
     args = parser.parse_args()
-    _ip, *_ = os.environ['SSH_CONNECTION'].split(' ')
+    if args.ip:
+        _ip = args.ip
+    else:
+        _ip, *_ = os.environ['SSH_CONNECTION'].split(' ')
+
     main(_ip, args.baud)

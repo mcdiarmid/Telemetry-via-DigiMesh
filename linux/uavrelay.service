@@ -1,8 +1,0 @@
-[Unit]
-Description=GCS Adapter script.
-
-[Service]
-ExecStart=/usr/local/bin/uavrelay
-
-[Install]
-WantedBy=multi-user.target 

@@ -1,3 +1,0 @@
-#!/usr/bin/bash
-sleep 3
-python3 /home/ucnavi3/Documents/Telemetry-via-DigiMesh/gcs_adapter.py

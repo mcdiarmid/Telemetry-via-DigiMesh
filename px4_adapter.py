@@ -375,7 +375,7 @@ if __name__ == '__main__':
     # Argument passing for PX4 adapter script
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        'settings', type=str,
+        '--settings', type=str, required=False, default='uav_settings.json',
         help='Path to UAV settings json file.')
     parser.add_argument(
         '--ssh', action='store_true',
