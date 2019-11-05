@@ -1,6 +1,5 @@
 {
   "id": 1,
-  "radio": "xbee",
   "mav_version": 2,
   "port": 14001,
   "mav_rates": {
