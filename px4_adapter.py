@@ -201,10 +201,12 @@ class PX4Adapter:
 
     def read_xbee_data(self, xbee: XBeeDevice, coordinator: RemoteXBeeDevice):
         """
+        Error tolerant XBee reading - returns an XBee packed upon a successful read - otherwise None if an error occurs
+        due to the link between xbee and coordinator radios being compromised.
 
-        :param xbee:
-        :param coordinator:
-        :return: XBee message
+        :param xbee: XBeeDevice representing XBee connected via USB to the computer running this script
+        :param coordinator: RemoteXBeeDevice representing the UAV coordinator's XBee radio
+        :return: XBee message from a successful read, or None if the read raised an XBeeException
         """
         try:
             message = xbee.read_data()  # Read XBee for Coordinator messages
