@@ -162,48 +162,58 @@ class PX4Adapter:
                 # Check who the message is from
                 if message.remote_device != coordinator:
                     xbee.send_data(message.remote_device, b'ENDPT')
-                    continue
 
                 # If broadcast trigger handover !!!
-                if message.is_broadcast:
+                elif message.is_broadcast:
                     self.change_coordinator()
                     time.sleep(0.01)
-                    continue
 
-                # Message received is from coordinator, read data and pass onto PX4
-                data = message.data
-                try:
-                    gcs_msg = self.px4.mav.decode(data)
-                    msg_type = gcs_msg.get_type()
-                except mavlink.MAVError as e:  # TODO should be doing something if this occurs
-                    print(e)
-                    continue
+                else:
+                    # Message received is from coordinator, read data and pass onto PX4
+                    data = message.data
+                    try:
+                        gcs_msg = self.px4.mav.decode(data)
+                    except mavlink.MAVError as e:
+                        print(e)
+                    else:
+                        msg_type = gcs_msg.get_type()
 
-                # Check for special message types
-                if msg_type == 'HEARTBEAT':
-                    """
-                    HEARTBEAT reply/"acknowledgement"
-                    Need to manually construct a RADIO_STATUS MAVLink message and place it at the front of
-                    priority_queue, as RADIO_STATUS messages are automatically constructed and sent back to the
-                    GCS on SiK radio firmware in response to a HEARTBEAT.  This is crucial for establishing a
-                    recognisable link on GCS software, such as QGroundControl.
-                    """
-                    self.heartbeat(xbee, coordinator)
+                        # Check for special message types
+                        if msg_type == 'HEARTBEAT':
+                            """
+                            HEARTBEAT reply/"acknowledgement"
+                            Need to manually construct a RADIO_STATUS MAVLink message and place it at the front of
+                            priority_queue, as RADIO_STATUS messages are automatically constructed and sent back to the
+                            GCS on SiK radio firmware in response to a HEARTBEAT.  This is crucial for establishing a
+                            recognisable link on GCS software, such as QGroundControl.
+                            """
+                            self.heartbeat(xbee, coordinator)
 
-                if msg_type not in MAV_IGNORES:
-                    self.px4.write(data)  # Write data from received message to PX4
+                        if msg_type not in MAV_IGNORES:
+                            self.px4.write(data)  # Write data from received message to PX4
 
-                try:
-                    message = xbee.read_data()  # Read XBee for Coordinator messages
-                except XBeeException:
-                    reconnect_blocker(xbee, coordinator)  # Block script until coordinator has been reconnected
-                    self.queue_out.clear()  # Clear queue once reconnected
-                    break
+                message = self.read_xbee_data(xbee, coordinator)
 
             time.sleep(0.001)
 
         # Device closed
         xbee.close()
+
+    def read_xbee_data(self, xbee: XBeeDevice, coordinator: RemoteXBeeDevice):
+        """
+
+        :param xbee:
+        :param coordinator:
+        :return: XBee message
+        """
+        try:
+            message = xbee.read_data()  # Read XBee for Coordinator messages
+        except XBeeException:
+            reconnect_blocker(xbee, coordinator)  # Block script until coordinator has been reconnected
+            self.queue_out.clear()  # Clear queue once reconnected
+            message = None
+
+        return message
 
     def _px4_rx_thread(self, px4_port, sleep_time=0.0005):
         """
@@ -316,7 +326,7 @@ class PX4Adapter:
         identifier = self.settings['id']
         port = self.settings['port']
         data = struct.pack('>BH', identifier, port)
-        _ = xbee.send_data(remote, data)
+        xbee.send_data(remote, data)
         rx_packet = xbee.read_data_from(remote)
         start = time.time()
 
@@ -389,7 +399,7 @@ if __name__ == '__main__':
 
     # UDP link directly between GCS and UAV (WiFi only)
     if args.ssh:
-        _ip, *_ = os.environ["SSH_CONNECTION"].split(" ")
+        _ip, *_ = os.environ['SSH_CONNECTION'].split(' ')
         _udp = f'{_ip}:{_port}'
     else:
         _udp = None
