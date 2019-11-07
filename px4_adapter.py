@@ -147,7 +147,7 @@ class PX4Adapter:
                     xbee.send_data(coordinator, tx_buffer[:XBEE_PKT_SIZE])
                     tx_buffer = tx_buffer[XBEE_PKT_SIZE:]
                     wait = loop_time + prev - time.time()
-                    time.sleep(wait if wait > 0 else 0)
+                    #time.sleep(wait if wait > 0 else 0)
 
                 message = xbee.read_data()  # Read XBee for Coordinator messages
             except XBeeException:
@@ -178,7 +178,7 @@ class PX4Adapter:
                     try:
                         gcs_msg = self.px4.mav.decode(data)
                     except mavlink.MAVError as e:
-                        logging.exception(e)
+                        logging.exception(f'MAVError: {data}')
                     else:
                         msg_type = gcs_msg.get_type()
 
@@ -244,7 +244,6 @@ class PX4Adapter:
             elif mav_type not in self.rates:  # Priority Message
                 self.queue_out.write(msg, priority=True)
                 logging.info(f'Priority message type: {mav_type}')
-                logging.debug(f'{msg.get_msgbuf()}')
             elif time.time() >= self.next_times[mav_type]:  # Scheduled message
                 self.next_times[mav_type] = time.time() + self.rates[mav_type]
                 self.queue_out.write(msg, priority=False)
