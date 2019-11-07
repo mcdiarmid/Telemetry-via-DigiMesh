@@ -21,7 +21,7 @@ import struct
 from pymavlink.generator.mavcrc import x25crc
 from digi.xbee.devices import XBeeDevice, RemoteXBeeDevice
 from digi.xbee.exception import XBeeException
-
+from digi.xbee.util.utils import disable_logger
 
 ########################################################################################################################
 #
@@ -101,6 +101,9 @@ def setup_logging(default_path='logs/px4_logging.json', default_level=logging.IN
         logging.config.dictConfig(config)
     else:
         logging.basicConfig(level=default_level)
+
+    disable_logger('digi.xbee.devices')
+    disable_logger('digi.xbee.reader')
 
 
 def _device_finder_linux(name):

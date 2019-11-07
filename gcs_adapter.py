@@ -257,7 +257,6 @@ def main(ip, baud_rate):
             time.sleep(0.1)
     except (KeyboardInterrupt, SystemExit) as e:
         logging.exception(e)
-        logging.info('Closing Script')
         software_adapter.close()
         del software_adapter
 
