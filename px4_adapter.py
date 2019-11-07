@@ -22,7 +22,7 @@ from digi.xbee.exception import XBeeException
 from digi.xbee.util.utils import bytes_to_int
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
-from commonlib import MAVQueue, device_finder, replace_seq, reconnect_blocker, setup_logging
+from commonlib import Fifo, MAVQueue, device_finder, replace_seq, reconnect_blocker, setup_logging
 from commonlib import XBEE_PKT_SIZE, XBEE_MAX_BAUD, PX4_COMPANION_BAUD, MAV_IGNORES
 
 
@@ -52,9 +52,11 @@ class PX4Adapter:
         """
         # Initialized lists, queues, look-up-tables and counters
         logging.info(f'PX4 adapter script initialized with udp_str={udp_str}')
+        # TODO Can probably make UAVObject a parent class with a little reworking
         self.known_endpoints = []
         self.old_coordinators = []
         self.queue_out = MAVQueue()
+        self.parser = mavlink.MAVLink(Fifo())
         self.settings = settings
         self.rates = settings['mav_rates']
         self.next_times = {k: time.time() + self.rates[k] for k in self.rates}
@@ -147,7 +149,7 @@ class PX4Adapter:
                     xbee.send_data(coordinator, tx_buffer[:XBEE_PKT_SIZE])
                     tx_buffer = tx_buffer[XBEE_PKT_SIZE:]
                     wait = loop_time + prev - time.time()
-                    #time.sleep(wait if wait > 0 else 0)
+                    # TODO time.sleep(wait if wait > 0 else 0)
 
                 message = xbee.read_data()  # Read XBee for Coordinator messages
             except XBeeException:
@@ -176,18 +178,19 @@ class PX4Adapter:
                     # Message received is from coordinator, read data and pass onto PX4
                     data = message.data
                     try:
-                        gcs_msg = self.px4.mav.decode(data)
-                    except mavlink.MAVError as e:
+                        messages = self.parser.parse_buffer(data)
+                    except mavlink.MAVError:
                         logging.exception(f'MAVError: {data}')
                     else:
-                        msg_type = gcs_msg.get_type()
+                        for gcs_msg in messages:
+                            msg_type = gcs_msg.get_type()
 
-                        # Check for special message types
-                        if msg_type == 'HEARTBEAT':
-                            self.heartbeat(xbee, coordinator)
+                            # Check for special message types
+                            if msg_type == 'HEARTBEAT':
+                                self.heartbeat(xbee, coordinator)
 
-                        if msg_type not in MAV_IGNORES:
-                            self.px4.write(data)  # Write data from received message to PX4
+                            if msg_type not in MAV_IGNORES:
+                                self.px4.write(gcs_msg.get_msgbuf())  # Write data from received message to PX4
 
                 message = self.read_xbee_data(xbee, coordinator)
 

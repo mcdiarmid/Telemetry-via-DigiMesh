@@ -35,7 +35,7 @@ XBEE_MAX_BAUD = 230400
 XBEE_PKT_SIZE = 255
 BYTE_MAX = 0xff
 MAVLINK_SEQ_BYTE = 4
-MAV_IGNORES = ['BAD_DATA']
+MAV_IGNORES = ['BAD_DATA', 'RADIO_STATUS']
 
 
 ########################################################################################################################
