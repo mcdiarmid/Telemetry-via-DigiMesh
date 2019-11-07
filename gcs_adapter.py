@@ -11,6 +11,7 @@ Author: Campbell McDiarmid
 ########################################################################################################################
 
 
+import logging
 import os
 import time
 import argparse
@@ -18,7 +19,7 @@ import threading
 import struct
 from digi.xbee.devices import XBeeDevice, RemoteXBeeDevice
 from digi.xbee.exception import InvalidPacketException, TimeoutException, InvalidOperatingModeException, XBeeException
-from commonlib import device_finder, MAVQueue, Fifo, XBEE_MAX_BAUD, XBEE_PKT_SIZE
+from commonlib import device_finder, setup_logging, MAVQueue, Fifo, XBEE_MAX_BAUD, XBEE_PKT_SIZE
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
 from pymavlink import mavutil
 
@@ -52,7 +53,7 @@ class UAVObject:
         self.parser = mavlink.MAVLink(Fifo())
         self.device = remote_device
         self.connected = True
-        print(f'Assigned {name} link to UDP {(ip, port)}')
+        logging.info(f'Assigned {name} link to UDP {(ip, port)}')
 
     def __repr__(self):
         return f'"{self.name}"@{self.ip}:{self.port}'
@@ -86,10 +87,10 @@ class XBee2UDP(object):
             try:
                 self.xbee.open()
             except (InvalidPacketException, InvalidOperatingModeException, TimeoutException) as e:
-                print(f'{e} raised while attempting to open XBee')
+                logging.exception(e)
                 time.sleep(3)
 
-        print('XBee opened successfully.')
+        logging.info('XBee opened successfully.')
         self.main_running = False
         self.dev_running = {}
         self._udp_tx_closed = True
@@ -113,7 +114,7 @@ class XBee2UDP(object):
         Sets while-loop conditions to False for all threads, so each will run to completion and appropriate clean-up
         processes will be executed prior to the script terminating.
         """
-        print(f'\nClosing script...')
+        logging.info(f'Closing script...')
         self.main_running = False
 
         while self.vehicles:
@@ -128,7 +129,7 @@ class XBee2UDP(object):
         vehicle.connected = False
         time.sleep(0.02)
         self.vehicles.remove(vehicle)
-        print(f'\nDeleting connection with {vehicle}')
+        logging.info(f'Deleting connection with {vehicle}')
         del vehicle
 
     def new_uav(self, request_message):
@@ -177,7 +178,7 @@ class XBee2UDP(object):
                     try:
                         mav_msgs = vehicle.parser.parse_buffer(rx_packet.data)
                     except mavlink.MAVError as e:  # Check MAVLink message for errors
-                        print(e)
+                        logging.exception(e)
                     else:
                         if mav_msgs:
                             vehicle.queue_in.extend(mav_msgs)
@@ -200,7 +201,8 @@ class XBee2UDP(object):
                         outgoing = outgoing[XBEE_PKT_SIZE:]
                         wait = loop_time + prev - time.time()
                         time.sleep(wait if wait > 0 else 0)
-                except XBeeException:
+                except XBeeException as e:
+                    logging.exception(e)
                     self.del_uav(vehicle)
                     break
 
@@ -217,6 +219,7 @@ class XBee2UDP(object):
 
         :param vehicle: UAVObject representing a connected vehicle
         """
+        logging.info(f'Started UDP Rx thread for {vehicle}')
         while vehicle.connected:
             msg = vehicle.socket.recv_msg()
             if msg:
@@ -228,7 +231,7 @@ class XBee2UDP(object):
         UDP transmission thread that iterates through the queues of each remote XBee device by Node ID and sends any
         data directly along the associated UDP socket to QGroundControl or other GCS.
         """
-        print(f'Started UDP Tx Thread')
+        logging.info(f'Started UDP Tx thread')
         while self.main_running:
             for vehicle in self.vehicles:
                 if vehicle.queue_in:
@@ -252,7 +255,9 @@ def main(ip, baud_rate):
         while True:
             # TODO prompt here for duplicate UDP ports, Relay UAV handovers and other future additions
             time.sleep(0.1)
-    except (KeyboardInterrupt, SystemExit):
+    except (KeyboardInterrupt, SystemExit) as e:
+        logging.exception(e)
+        logging.info('Closing Script')
         software_adapter.close()
         del software_adapter
 
@@ -270,5 +275,5 @@ if __name__ == '__main__':
         _ip = args.ip
     else:
         _ip, *_ = os.environ['SSH_CONNECTION'].split(' ')
-
+    setup_logging('logs/gcs_logging.json')
     main(_ip, args.baud)

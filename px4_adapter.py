@@ -9,6 +9,8 @@ Author: Campbell McDiarmid
 #
 ########################################################################################################################
 
+
+import logging
 import os
 import time
 import threading
@@ -20,8 +22,8 @@ from digi.xbee.exception import XBeeException
 from digi.xbee.util.utils import bytes_to_int
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mavlink
-from commonlib import device_finder, MAVQueue, replace_seq, reconnect_blocker, XBEE_PKT_SIZE, XBEE_MAX_BAUD, \
-    PX4_COMPANION_BAUD, MAV_IGNORES
+from commonlib import MAVQueue, device_finder, replace_seq, reconnect_blocker, setup_logging
+from commonlib import XBEE_PKT_SIZE, XBEE_MAX_BAUD, PX4_COMPANION_BAUD, MAV_IGNORES
 
 
 ########################################################################################################################
@@ -49,6 +51,7 @@ class PX4Adapter:
         :param udp_str: String format for UDP connection target ('IP:PORT')
         """
         # Initialized lists, queues, look-up-tables and counters
+        logging.info(f'PX4 adapter script initialized with udp_str={udp_str}')
         self.known_endpoints = []
         self.old_coordinators = []
         self.queue_out = MAVQueue()
@@ -59,48 +62,43 @@ class PX4Adapter:
         self.running = False
         self.px4 = None
         self.udp_str = udp_str
+        self.px4_port = device_finder('FT232R USB UART')
 
-        # Initialize PX4 MAVLink serial connection
-        px4_port = device_finder('FT232R USB UART')
-
+    def start(self):
+        """
+        End blocking loop in all threads
+        """
+        logging.info('Starting PX4 adapter script threads')
         # Initialize threads
-        _parse_thread = threading.Thread(target=self._px4_rx_thread, args=(px4_port,), daemon=True)
+        _parse_thread = threading.Thread(target=self._px4_rx_thread, daemon=True)
         if self.udp_str:
-            _out_thread = threading.Thread(target=self._udp_thread, args=(self.udp_str,), daemon=True)
+            _out_thread = threading.Thread(target=self._udp_thread,  daemon=True)
         else:
             _out_thread = threading.Thread(target=self._xbee_thread, daemon=True)
 
         # Start threads
         _parse_thread.start()
         _out_thread.start()
-
-    def start(self):
-        """
-        End blocking loop in all threads
-        """
-        print('STARTING')
         self.running = True
 
     def stop(self):
         """
         Run all threads to completion
         """
-        print('STOPPING')
+        logging.info('Stopping PX4 adapter script threads')
         self.running = False
 
-    def _udp_thread(self, udp_str):
+    def _udp_thread(self):
         """
         I. Check queue from PX4 for messages
         II. Check messages from GCS via UDP and pass onto PX4
-
-        :param udp_str: String representation of UDP link ('IP:PORT')
         """
         while not self.running:
             time.sleep(0.01)
 
-        socket = mavutil.mavudp(device=udp_str, input=False)
+        socket = mavutil.mavudp(device=self.udp_str, input=False)
 
-        print(f'Started main message handling loop')
+        logging.info('Started UDP message handling loop')
         while self.running:
             # I. Check queue from PX4 for messages
             while self.queue_out:
@@ -133,7 +131,7 @@ class PX4Adapter:
         coordinator = self.find_coordinator(xbee)
         max_average_bps = 28800
 
-        print(f'Started main message handling loop')
+        logging.info('Started XBee message handling loop')
         while self.running:
             # I. Consume queue_out and add to a buffer of bytes
             tx_buffer = b''
@@ -161,12 +159,18 @@ class PX4Adapter:
             while message:
                 # Check who the message is from
                 if message.remote_device != coordinator:
+                    # Message from another endpoint searching for a coordinator
+                    logging.info('Message from another endpoint received.')
                     xbee.send_data(message.remote_device, b'ENDPT')
 
-                # If broadcast trigger handover !!!
                 elif message.is_broadcast:
-                    self.change_coordinator()
+                    # If broadcast trigger handover !!! TODO
+                    logging.warning('Message broadcast received - Coordinator handover initiated.')
+                    self.old_coordinators.append(coordinator)
+                    self.queue_out.clear()
+                    self.stop()
                     time.sleep(0.01)
+                    break
 
                 else:
                     # Message received is from coordinator, read data and pass onto PX4
@@ -174,19 +178,12 @@ class PX4Adapter:
                     try:
                         gcs_msg = self.px4.mav.decode(data)
                     except mavlink.MAVError as e:
-                        print(e)
+                        logging.exception(e)
                     else:
                         msg_type = gcs_msg.get_type()
 
                         # Check for special message types
                         if msg_type == 'HEARTBEAT':
-                            """
-                            HEARTBEAT reply/"acknowledgement"
-                            Need to manually construct a RADIO_STATUS MAVLink message and place it at the front of
-                            priority_queue, as RADIO_STATUS messages are automatically constructed and sent back to the
-                            GCS on SiK radio firmware in response to a HEARTBEAT.  This is crucial for establishing a
-                            recognisable link on GCS software, such as QGroundControl.
-                            """
                             self.heartbeat(xbee, coordinator)
 
                         if msg_type not in MAV_IGNORES:
@@ -210,14 +207,15 @@ class PX4Adapter:
         """
         try:
             message = xbee.read_data()  # Read XBee for Coordinator messages
-        except XBeeException:
+        except XBeeException as e:
+            logging.exception(e)
             reconnect_blocker(xbee, coordinator)  # Block script until coordinator has been reconnected
             self.queue_out.clear()  # Clear queue once reconnected
             message = None
 
         return message
 
-    def _px4_rx_thread(self, px4_port, sleep_time=0.0005):
+    def _px4_rx_thread(self, sleep_time=0.0005):
         """
         This function serves the purpose of receiving messages from the flight controller at such a rate that no buffer
         overflow occurs.  When mav_device.recv_msg() is called, if enough data has come in from the serial connection to
@@ -225,13 +223,12 @@ class PX4Adapter:
         updated in the mav_device.messages dict.  This dict is used in the main thread for scheduling the transmission
         of each type of MAVLink packet, effectively decimating the stream to a set rate for each type of MAVLink message
 
-        :param px4_port: String representation of the path to PX4 device
         :param sleep_time: Sleep time between loops
         """
         while not self.running:
             time.sleep(0.01)
 
-        self.px4 = mavutil.mavserial(px4_port, PX4_COMPANION_BAUD, source_component=1)
+        self.px4 = mavutil.mavserial(self.px4_port, PX4_COMPANION_BAUD, source_component=1)
 
         while self.running:
             # Rx Message
@@ -246,15 +243,19 @@ class PX4Adapter:
                 pass
             elif mav_type not in self.rates:  # Priority Message
                 self.queue_out.write(msg, priority=True)
-                print(f'Priority message of type: {mav_type}')
+                logging.info(f'Priority message type: {mav_type}')
+                logging.debug(f'{msg.get_msgbuf()}')
             elif time.time() >= self.next_times[mav_type]:  # Scheduled message
                 self.next_times[mav_type] = time.time() + self.rates[mav_type]
                 self.queue_out.write(msg, priority=False)
+
+        self.px4.close()
 
     def process_mav_message(self):
         """
         Since the output rate of each MAVLink message type is decimated, the sequence byte must be replaced and CRC
         recalculated before sending the message back to the GCS.
+
         :return: Bytes buffer of outgoing TX data
         """
         buffer = b''
@@ -264,7 +265,7 @@ class PX4Adapter:
         self.seq += 1
         return buffer
 
-    def heartbeat(self, xbee, coordinator):
+    def heartbeat(self, xbee: XBeeDevice, coordinator: RemoteXBeeDevice):
         """
         HEARTBEAT reply/"acknowledgement"
         Need to manually construct a RADIO_STATUS MAVLink message and place it at the front of
@@ -275,6 +276,7 @@ class PX4Adapter:
         :param xbee:
         :param coordinator:
         """
+        logging.debug('Generating fake heartbeat')
         rssi = bytes_to_int(xbee.get_parameter('DB'))
         remrssi = bytes_to_int(coordinator.get_parameter('DB'))
         errors = bytes_to_int(xbee.get_parameter('ER'))
@@ -292,12 +294,11 @@ class PX4Adapter:
         """
         # Discover network.  Repeat until GCS has been found.
         network = xbee.get_network()
-        network.add_device_discovered_callback(print)
+        network.add_device_discovered_callback(logging.debug)
         network.set_discovery_timeout(5)
 
-        print('Beginning Coordinator Discovery loop.')
+        logging.debug('Beginning Coordinator Discovery loop.')
         while True:
-            print('Discovering network, Coordinator not found yet.')
             network.start_discovery_process()
 
             # Block until discovery is finished TODO is blocking required?
@@ -309,13 +310,7 @@ class PX4Adapter:
                 if device not in self.known_endpoints or device not in self.old_coordinators:
                     check = self.check_coordinator(xbee, device)
                     if check is True:
-                        print(f'Coordinator found: {device}')
                         return device
-                    elif check is False:
-                        print(f'Endpoint found: {device}')
-                        self.known_endpoints.append(device)
-                    else:
-                        print(f'No response: {device}')
 
     def check_coordinator(self, xbee: XBeeDevice, remote: RemoteXBeeDevice):
         """
@@ -331,32 +326,29 @@ class PX4Adapter:
         xbee.send_data(remote, data)
         rx_packet = xbee.read_data_from(remote)
         start = time.time()
-
-        print(f'Awaiting response or 5s timeout')
+        logging.info('Awaiting response or 5s timeout')
 
         while not rx_packet and time.time() - start < 5:
             rx_packet = xbee.read_data_from(remote)
             time.sleep(0.1)
 
         if not rx_packet:
-            print(f'Timed out')
-            return None
+            msg = f'No response: {remote}'
+            ret = None
         elif rx_packet.data == b'COORD':
-            print(f'Coordinator found!')
-            return True
+            msg = f'Coordinator found: {remote}'
+            self.known_endpoints.append(remote)
+            ret = True
         elif rx_packet.data == b'ENDPT':
-            print(f'Endpoint found!')
-            return False
+            msg = f'Endpoint found: {remote}'
+            ret = False
         else:
-            raise Exception(f'Unexpected data packet {rx_packet.data}')
+            except_msg = f'Unexpected data packet {rx_packet.data}'
+            logging.exception(except_msg)
+            raise Exception(except_msg)
 
-    def change_coordinator(self):
-        """
-        TODO This will require some additional work
-        """
-        print('CHANGING COORDINATOR')
-        self.queue_out.clear()
-        self.stop()
+        logging.info(msg)
+        return ret
 
 
 ########################################################################################################################
@@ -405,5 +397,5 @@ if __name__ == '__main__':
         _udp = f'{_ip}:{_port}'
     else:
         _udp = None
-
+    setup_logging()
     main(_uav_settings, udp_str=_udp)

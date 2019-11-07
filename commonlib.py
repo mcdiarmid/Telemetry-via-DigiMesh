@@ -10,8 +10,12 @@ Author: Campbell McDiarmid
 ########################################################################################################################
 
 
+import os
+import logging
+import logging.config
 import platform
 import time
+import json
 import serial.tools.list_ports as list_ports
 import struct
 from pymavlink.generator.mavcrc import x25crc
@@ -82,26 +86,43 @@ class MAVQueue(list):
 ########################################################################################################################
 
 
+def setup_logging(default_path='logs/px4_logging.json', default_level=logging.INFO):
+    """
+    Sets up logging dump to the logs/ directory.
+
+    :param default_path: Default logging configuration file location
+    :param default_level: Default Logging level
+    """
+    path = default_path
+
+    if os.path.exists(path):
+        with open(path, 'rt') as f:
+            config = json.load(f)
+        logging.config.dictConfig(config)
+    else:
+        logging.basicConfig(level=default_level)
+
+
 def _device_finder_linux(name):
     while True:
         for comport in list_ports.comports():
             if comport.product:
                 if name in comport.product:
-                    print(f'{name} found')
+                    logging.info(f'{name} found')
                     return comport.device
-        print(f'List of Comports: {list_ports.comports()}')
-        print(f'Please insert {name} device')
-        time.sleep(5)
+        logging.debug(f'List of Comports: {list_ports.comports()}')
+        logging.debug(f'Please insert {name} device')
+        time.sleep(2.5)
 
 
 def _device_finder_windows(name):
     while True:
         for comport in list_ports.comports():
             if comport.device == 'COM3':  # TODO
-                print(f'{name} found')
+                logging.info(f'{name} found')
                 return comport.device
-        print(f'List of Comports: {list_ports.comports()}')
-        print(f'Please insert {name} device')
+        logging.debug(f'List of Comports: {list_ports.comports()}')
+        logging.debug(f'Please insert {name} device')
         time.sleep(5)
 
 
@@ -118,16 +139,16 @@ def reconnect_blocker(local: XBeeDevice, remote: RemoteXBeeDevice):
     :param local: Local XBee radio (connected to computer via USB)
     :param remote: Remote XBee radio that a connection has been lost with
     """
-    print(f'Link lost with coordinator')
+    logging.warning(f'Link lost with {remote}')
     reconnected = False
     while not reconnected:
         try:
-            _ = local.read_data_from(remote)
+            local.read_data_from(remote)
         except XBeeException:
             time.sleep(1)
         else:
             reconnected = True
-    print(f'Link regained with coordinator')
+    logging.warning(f'Link regained with {remote}')
 
 
 def replace_seq(msg, seq):
