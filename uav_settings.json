@@ -4,6 +4,8 @@
   "port": 14001,
   "mav_rates": {
     "ATTITUDE": 0.125,
+    "RC_CHANNELS": 0.1,
+    "RC_CHANNELS_OVERRIDE": 0.1,
     "VFR_HUD": 0.625,
     "ODOMETRY":	0.825,
     "GPS_RAW_INT": 0.25,
