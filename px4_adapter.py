@@ -131,7 +131,6 @@ class PX4Adapter:
         xbee = XBeeDevice(xbee_port, XBEE_MAX_BAUD)
         xbee.open()
         coordinator = self.find_coordinator(xbee)
-        max_average_bps = 28800
 
         logging.info('Started XBee message handling loop')
         while self.running:
@@ -142,15 +141,10 @@ class PX4Adapter:
                 tx_buffer += msg_bytes
 
             # II. Transmit buffered bytes, catch exceptions raised if connection has been lost
-            loop_time = XBEE_PKT_SIZE * 8 / max_average_bps
             try:
                 while tx_buffer:
-                    prev = time.time()
                     xbee.send_data(coordinator, tx_buffer[:XBEE_PKT_SIZE])
                     tx_buffer = tx_buffer[XBEE_PKT_SIZE:]
-                    wait = loop_time + prev - time.time()
-                    # TODO time.sleep(wait if wait > 0 else 0)
-
                 message = xbee.read_data()  # Read XBee for Coordinator messages
             except XBeeException:
                 reconnect_blocker(xbee, coordinator)  # Block script until coordinator has been reconnected

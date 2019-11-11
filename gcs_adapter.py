@@ -193,14 +193,10 @@ class XBee2UDP(object):
             # II. Service queues from GCS (outgoing/Tx)
             for vehicle in self.vehicles:
                 outgoing = vehicle.queue_out.read_bytes()
-                loop_time = XBEE_PKT_SIZE * 8 / XBEE_MAX_BAUD
                 try:
                     while outgoing:
-                        prev = time.time()
                         self.xbee.send_data(vehicle.device, outgoing[:XBEE_PKT_SIZE])
                         outgoing = outgoing[XBEE_PKT_SIZE:]
-                        wait = loop_time + prev - time.time()
-                        time.sleep(wait if wait > 0 else 0)
                 except XBeeException as e:
                     logging.exception(e)
                     self.del_uav(vehicle)
