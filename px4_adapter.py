@@ -13,6 +13,8 @@ Author: Campbell McDiarmid
 import logging
 import os
 import time
+import subprocess
+import datetime
 import threading
 import argparse
 import json
@@ -43,7 +45,7 @@ class PX4Adapter:
     - A direct UDP link to GCS software if this UAV is intended to be a Relay/Coordinator.  Does not need gcs_adapter.py
       to receive and forward messages onto GCS.
     """
-    def __init__(self, settings, udp_str=None):
+    def __init__(self, settings, udp_str=None, usbcam=False):
         """
         Initializer
 
@@ -65,6 +67,7 @@ class PX4Adapter:
         self.px4 = None
         self.udp_str = udp_str
         self.px4_port = device_finder('FT232R USB UART')
+        self.usbcam = usbcam
 
     def start(self):
         """
@@ -77,6 +80,10 @@ class PX4Adapter:
             _out_thread = threading.Thread(target=self._udp_thread,  daemon=True)
         else:
             _out_thread = threading.Thread(target=self._xbee_thread, daemon=True)
+        
+        if self.usbcam:
+            _cam_thread = threading.Thread(target=self._usb_camera_thread, daemon=True)
+            _cam_thread.start()        
 
         # Start threads
         _parse_thread.start()
@@ -346,6 +353,55 @@ class PX4Adapter:
         logging.info(msg)
         return ret
 
+    def _usb_camera_thread(self):
+        """
+        Records video from a USB camera
+        TODO Add arguments for resolution, format, source, fps, or entire ffmpeg call.
+        """
+
+        while not self.running or self.px4 is None:
+            time.sleep(0.01)
+
+        call = "ffmpeg -f v4l2 -framerate 60 -video_size 1960x1080 -input_format mjpeg -i /dev/video0"
+        env = os.environ.copy()
+        video_subproccess = subprocess.Popen("/bin/bash", stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, shell=True, env=env)
+
+        # Loop forever
+        while self.running:
+            # Trigger on Take-Off (Armed)
+            logging.info('Waiting for vehicle to arm.')
+            try:
+                while not self.px4.motors_armed():
+                    time.sleep(1)
+            except Exception as e:
+                logging.exception(e)
+                break
+            
+            # Start video code
+            logging.info('Vehicle armed.')
+
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")
+            filename = f"videos/{timestamp}.mkv"
+            video_subproccess.stdin.write(f"{call} {filename}\n".encode())
+            video_subproccess.stdin.flush()
+            
+            logging.info('Video recording started.')
+
+            # Trigger on Landing (Disarmed)
+            try:
+                while self.px4.motors_armed():
+                    time.sleep(1)
+            except Exception as e:
+                logging.exception(e)
+            
+            # End recording code
+            logging.info('Vehicle disarmed.')
+            video_subproccess.stdin.write(b"q")
+            video_subproccess.stdin.flush()
+            logging.info('Recording stopped.')
+        
+        video_subprocess.kill()
+        logging.info('Video subprocess killed.')
 
 ########################################################################################################################
 #
@@ -354,7 +410,7 @@ class PX4Adapter:
 ########################################################################################################################
 
 
-def main(settings, udp_str=None):
+def main(settings, udp_str=None, usbcam=False):
     """
     Infinite loop that establishes a connection to GCS either directly over UDP or via a coordinator XBee radio
     depending whether or not udp_str is specified.
@@ -362,7 +418,7 @@ def main(settings, udp_str=None):
     :param settings: Dict of settings/parameters related to the UAV running this software
     :param udp_str: String representation of UDP link ('IP:PORT')
     """
-    px4_adapter = PX4Adapter(settings, udp_str)
+    px4_adapter = PX4Adapter(settings, udp_str, usbcam)
     while True:
         px4_adapter.start()
         while px4_adapter.running:
@@ -380,6 +436,9 @@ if __name__ == '__main__':
     parser.add_argument(
         '--ssh', action='store_true',
         help='SSH_CONNECTION environment variable when using SSH from GCS computer over WiFi (relay only).')
+    parser.add_argument(
+        '--usbcam', action='store_true',
+        help='Store video recordings while armed if a USB Camera is connected.')
     args = parser.parse_args()
 
     # JSON File
@@ -394,4 +453,4 @@ if __name__ == '__main__':
     else:
         _udp = None
     setup_logging()
-    main(_uav_settings, udp_str=_udp)
+    main(_uav_settings, udp_str=_udp, usbcam=args.usbcam)
