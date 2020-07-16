@@ -45,34 +45,34 @@ should be able to interface with these scripts easily.
 The purpose of these scripts are to enable the use of XBee DigiMesh without the need to 
 modify the Pixhawk PX4 firmware, or compiling a custom build for GCS software.  
 
-* ```px4_adapter.py``` has been designed to operate on a companion computer that is connected to
+* ```px4.py``` has been designed to operate on a companion computer that is connected to
 both a Pixhawk and either an XBee radio or WiFi module.  If using an XBee, a link negotiation is performed with
-the coordinator computer running ```gcs_adapter.py```.  If using WiFi with the ```--ssh``` flag, this script is 
+the coordinator computer running ```gcs.py```.  If using WiFi with the ```--ssh``` flag, this script is 
 intended to communicated directly to QGroundControl over UDP.
 
-* By default ```px4_adapter.py``` loads  ```uav_settings.json``` for parameters and settings related to the UAV, along with
+* By default ```px4.py``` loads  ```uav_settings.json``` for parameters and settings related to the UAV, along with
 a look-up-table that defines the period between transmissions for each routinely scheduled MAVLink message.  This was added
 to effectively decimate the rate of data coming out of the Pixhawk to very easily meet any bandwidth constraints.  Other 
 parameters include MAVLink version, UDP port and vehicle ID.
 
-* ```gcs_adapter.py``` acts as an interface between an XBee device and GCS software.  For each
+* ```gcs.py``` acts as an interface between an XBee device and GCS software.  For each
 XBee device connected to the mesh network, a UDP socket is created and connected to a user 
 defined port (UDP server hosted by GCS software).
 
 Dedicated endpoint or relay in a purely DigiMesh network:
 ```bash
-nohup python3 px4_adapter.py &
+nohup python3 px4.py &
 ```
 
 GCS computer running QGroundControl using DigiMesh to communicate to endpoint UAVs:
 ```bash
-python3 gcs_adapter.py --ip 127.0.0.1
+python3 gcs.py --ip 127.0.0.1
 ```
 
 Relay UAV communicating to endpoint UAVs via DigiMesh and WiFi to bridge connections back to the GCS computer:
 ```bash
-nohup python3 px4_adapter.py --ssh &
-nohup python3 gcs_adapter.py &
+nohup python3 px4.py --ssh &
+nohup python3 gcs.py &
 ```
 
 *Note: The nohup should be used if you intend to start the script over SSH and then close the session once everything has started correctly* 

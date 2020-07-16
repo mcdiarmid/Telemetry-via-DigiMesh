@@ -60,7 +60,7 @@ class Fifo(list):
 class MAVQueue(list):
     """
     Basic first in first out (FIFO) buffer implementation with a few tailored adjustments for dealing with MAVLink
-    messages for px4_adapter.py and gcs_adapter.py
+    messages for px4.py and gcs.py
     """
     def write(self, mav_msg, priority=False):
         if priority:
