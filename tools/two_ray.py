@@ -63,12 +63,23 @@ def fs_path_loss(d, ht, hr, f):
     return wl/(4*pi*l)
 
 
-def local_maxima_indicies(arr):
-    max_inds = []
+def local_optima_indicies(arr, maxima=True):
+    opt_inds = []
+    fn = type(arr[0]).__gt__ if maxima else type(arr[0]).__lt__
     for i, val in enumerate(arr[1:-2], start=1):
-        if val > arr[i-1] and val > arr[i+1]:
-            max_inds.append(i)
-    return max_inds
+        if fn(val, arr[i-1]) and fn(val, arr[i+1]):
+            opt_inds.append(i)
+    return opt_inds
+
+
+def high_resolution_threshold(x_arr, y_arr, threshold, y_fn):
+    j = np.argmax(y_arr<threshold)
+    x_min, x_max = int(x_arr[j-1]), int(x_arr[j+1])+1
+    x_tmp = np.arange(x_min, x_max, dtype=np.int64)
+    y_tmp = y_fn(x_tmp)
+    k = np.argmax(y_tmp<threshold)
+    print(f'({x_tmp[k]}, {threshold})')
+    return x_tmp[k]
 
 
 # Known Constants
@@ -86,7 +97,7 @@ Ptx = 24  # dBm tx power
 Prx = -101  # Receiver sensitivity dBm
 surf_res = 100
 phi_bws = np.array([12.5, 30, 50, 70])*pi/180
-hatches = ('+', '*','\\', 'o')
+hatches = ('+', '*', '\\', 'o')
 
 # Variables
 relay_height = 250
@@ -182,10 +193,10 @@ zc = z[crop:, :]
 yc = y[crop:, :]
 xc = x[crop:, :]
 
-start_inds_x = local_maxima_indicies(zc[0, :])
-start_inds_y = local_maxima_indicies(zc[:, 0])
-end_inds_x = local_maxima_indicies(zc[-1,:])
-end_inds_y = local_maxima_indicies(zc[:,-1])
+start_inds_x = local_optima_indicies(zc[0, :])
+start_inds_y = local_optima_indicies(zc[:, 0])
+end_inds_x = local_optima_indicies(zc[-1,:])
+end_inds_y = local_optima_indicies(zc[:,-1])
 dis_pairs = [-(x+1) for x in range(len(start_inds_x)+len(start_inds_y))]
 ind_pairs = []
 scatters = np.zeros((3, len(dis_pairs)*2))
@@ -236,7 +247,7 @@ axis_gcs_relay = fig_gcs_relay.subplots(1, 2)
 
 # Local Maxima Calcs
 for i in range(0, n_y, n_y//20):
-    max_inds = local_maxima_indicies(z[i,:])
+    max_inds = local_optima_indicies(z[i,:])
     y_i = y[i, 0]
     x_vals =  x[0, max_inds]
     y_vals = y_i * np.ones(x_vals.shape)
@@ -361,7 +372,8 @@ title = fig_gcs_relay.suptitle('Spatial Constraints of Directional Antenna Use',
 
 # GCS -- Relay FSPL
 Gl_24 = 3 + 6 + 0 + 0
-fspl_2ghz = 20*log10(fs_path_loss(x, h_g, y, 2.4e9))
+fc_24 = 2.4e9
+fspl_2ghz = 20*log10(fs_path_loss(x, h_g, y, fc_24))
 fig_2ghz = plt.figure(len(figs)+4, constrained_layout=True)
 sp_2ghz = fig_2ghz.subplots(1,1)
 
@@ -395,45 +407,55 @@ consts = {
 }
 
 
-x_arr, y_arr = d_arr, fspl_2ghz[i_yc, :]
+x_array, y_array = d_arr, fspl_2ghz[i_yc, :]
 var, con = 'd', 'h_r'
 axis = sp_2ghz
 legend_items = []
 tbl_list = []
 
 for i, (tx, rx) in enumerate(MCS):
-    # Calculate P_rx and identify intersection
-    p_rx_arr = y_arr + Gl_24 + tx
-    j = np.argmax(p_rx_arr<rx)
+    # Calculate P_rx
+    p_rx_array = y_array + Gl_24 + tx
 
     # Plot stuff
     color = f'C{i%8}'
     if i < 8:
-        axis.plot(x_arr, p_rx_arr, f'C{i%8}-')
+        axis.plot(x_array, p_rx_array, f'C{i%8}-')
         legend_items.append(Line2D([0], [0], color=color, ls='-', label=f'MCS {i}, {i+8}'))
         marker = ':'
     else:
         marker = '-.'
         
-    axis.plot([x_arr[0], x_arr[-1]], [rx, rx], f'{color}{marker}')
+    axis.plot([x_array[0], x_array[-1]], [rx, rx], f'{color}{marker}')
     
-    # Determine more accurate estimate for exact $d$
-    x_min, x_max = int(x_arr[j-1]), int(x_arr[j+1])+1
-    d_tmp = np.arange(x_min, x_max)
-    p_tmp = 20*log10(fs_path_loss(d_tmp, h_g, relay_height, 2.4e9)) + Gl_24 + tx
-    k = np.argmax(p_tmp<rx)
-    tbl_list.append(d_tmp[k])
+    # Determine accurate estimate for exact $d_{max}$
+    tol_tbl = []
+    for tol in (+2, 0, -2):
+        rx_tmp = rx+tol
+        p_fn = lambda X: 20*log10(fs_path_loss(X, h_g, relay_height, fc_24)) + Gl_24 + tx
+        x_threshold = high_resolution_threshold(x_array, p_rx_array, rx_tmp, p_fn)
+        tol_tbl.append(x_threshold)
+
+    tbl_list.append(tol_tbl)
     
 # Print out for latex table format
+table1_text = ''
+table2_text = ''
 for i in range(len(tbl_list)//2):
-    print(f'\t\t{i} & {tbl_list[i]:>5} m & {i+8:>2} & {tbl_list[i+8]:>5} m\\\\')
+    line1 = ' & '.join(f'{i+di:>2} & ' + ' & '.join(f'{x/1000:>5.2f} km' for x in tbl_list[i+di][::2]) for di in (0,8))
+    line2 = ' & '.join(f'{i+di:>2} & {tbl_list[i+di][1]/1000:>5.2f} km' for di in (0,8))
+    table1_text += f'\t\t{line1}\\\\\n'
+    table2_text += f'\t\t{line2}\\\\\n'
+
+print(table1_text)
+print(table2_text)
 
 legend_items.extend([
     Line2D([0], [0], color='k', ls=':', label='$P_{RS}$, MCS0-7'),
     Line2D([0], [0], color='k', ls='-.', label='$P_{RS}$, MCS8-15'),
     ])
 
-axis.set_xlim([x_arr[0], x_arr[-1]])
+axis.set_xlim([x_array[0], x_array[-1]])
 axis.set_xscale('log')
 axis.set_xlabel(f'{labels[var]} ${var}$ (m)')
 axis.set_ylabel('Received Power, $P_{Rx}$ (dB)')
